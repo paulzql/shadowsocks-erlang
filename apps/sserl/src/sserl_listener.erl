@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1]).
+-export([start_link/1,get_port/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -44,7 +44,46 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(Args) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [Args], []).
+    %% 获取配置信息
+    Port       = proplists:get_value(port, Args),
+    ConnLimit  = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
+    FlowLimit  = proplists:get_value(flow_limit,  Args, ?MAX_LIMIT),
+    AddrLimit  = proplists:get_value(addr_limit,  Args, ?MAX_LIMIT),
+    Type       = proplists:get_value(type, Args, server),
+    Password  = proplists:get_value(password, Args),
+    Method     = proplists:get_value(method, Args, table),
+    IP        = proplists:get_value(ip, Args, undefined),
+    %% 校验参数
+    ValidMethod = lists:any(fun(M) -> M =:= Method end, shadowsocks_crypt:methods()),
+    if
+        not is_integer(Port) ->
+            {error, {badargs, port_need_integer}};
+        Port < 0 orelse Port > 65535 ->
+            {error, {badargs, port_out_of_range}};
+        not is_integer(ConnLimit) ->
+            {error, {badargs, conn_limit_need_integer}};
+        not is_integer(FlowLimit) ->
+            {error, {badargs, flow_limit_need_integer}};
+        not is_integer(AddrLimit) ->
+            {error, {badargs, addr_limit_need_integer}};
+        Type =/= server andalso Type =/= client ->
+            {error, {badargs, error_type}};
+        not ValidMethod ->
+            {error, {badargs, unsupported_method}};
+        not is_list(Password) ->
+            {error, {badargs, password_need_list}};
+        true ->
+            State = #state{type=Type, port=Port, lsocket=undefined, 
+                                conn_limit=ConnLimit, 
+                                flow_limit=FlowLimit, 
+                                addr_limit=AddrLimit, 
+                                password=Password, method=Method, 
+                                accepting=true},
+            gen_server:start_link({local, ?SERVER}, ?MODULE, [State,IP], [])
+    end.
+
+get_port(Pid) ->
+    gen_server:call(Pid, get_port).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -61,39 +100,27 @@ start_link(Args) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Args]) ->
+init([State,IP]) ->
     process_flag(trap_exit, true),
-    %% 获取配置信息
-    Port       = proplists:get_value(port, Args),
-    ConnLimit  = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
-    FlowLimit  = proplists:get_value(flow_limit,  Args, ?MAX_LIMIT),
-    AddrLimit  = proplists:get_value(addr_limit,  Args, ?MAX_LIMIT),
-    Type       = proplists:get_value(type, Args, server),
-    Password  = proplists:get_value(password, Args),
-    Method     = proplists:get_value(method, Args, default),
+
 
     Opts = [binary, {backlog, 20},{nodelay, true}, {active, false}, 
             {packet, raw}, {reuseaddr, true},{send_timeout_close, true}],
     %% 获取IP地址
-    Opts1 = case proplists:get_value(ip, Args) of
+    Opts1 = case IP of
         undefined ->
             Opts;
         Addr ->
              Opts++[{ip, Addr}]
     end,
     %% 开始监听
-    case gen_tcp:listen(Port, Opts1) of
+    case gen_tcp:listen(State#state.port, Opts1) of
         {ok, LSocket} ->
             %% 设置异步接收
             case prim_inet:async_accept(LSocket, -1) of
                 {ok, _} ->
-                    sserl_stat:notify({listener, new, Port}),
-                    {ok, #state{type=Type, port=Port, lsocket=LSocket, 
-                                conn_limit=ConnLimit, 
-                                flow_limit=FlowLimit, 
-                                addr_limit=AddrLimit, 
-                                password=Password, method=Method, 
-                                accepting=true}};
+                    sserl_stat:notify({listener, new, State#state.port}),
+                    {ok, State#state{lsocket=LSocket}};
                 {error, Error} ->
                     {stop, Error}
             end;

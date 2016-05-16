@@ -42,11 +42,11 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(Socket, Info) ->
-    Pid = spawn_link(?MODULE, init, [Socket, Info]),
-    {ok, Pid}.
+    proc_lib:start_link(?MODULE, init, [Socket, Info]).
     %% gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 init(Socket, {Type, Method, Password, Limit}) ->
+    proc_lib:init_ack({ok, self()}),
     wait_socket(Socket),
     State = #state{csocket=Socket, ssocket=undefined, 
                    type=Type, limit=Limit,
@@ -57,11 +57,11 @@ init(Socket, {Type, Method, Password, Limit}) ->
 loop(State=#state{type=server, csocket=CSocket}) ->
     State1 = recv_ivec(State),
     {Addr, Port, State2, Data} = recv_target(State1),
-    io:format("Addr:~p,Port:~p~n", [Addr,Port]),
+    sserl_stat:notify({conn, new, Addr, Port}),
     case gen_tcp:connect(Addr, Port, [binary, {packet, raw}, {active, once},{nodelay, true}]) of
         {ok, SSocket} ->
-            inet:setopts(CSocket, [{active, once}]),
             gen_tcp:send(SSocket, Data),
+            inet:setopts(CSocket, [{active, once}]),
             gen_server:enter_loop(?MODULE, [], State2#state{ssocket=SSocket});
         {error, Reason} ->
             exit(Reason)
@@ -189,7 +189,7 @@ wait_socket(Socket) ->
 
 
 %% 接收IV信息
-recv_ivec(State = #state{cipher_info=#cipher_info{method=Method}}) when Method=:=default;Method=:=rc4 ->
+recv_ivec(State = #state{cipher_info=#cipher_info{method=Method}}) when Method=:=table ->
     State;
 recv_ivec(State = #state{csocket=Socket, 
                          cipher_info=#cipher_info{method=Method,key=Key}=CipherInfo}) ->
@@ -210,7 +210,7 @@ recv_target(State) ->
             {<<DestAddr:4/binary, DestPort:16/big, Data2/binary>>, State2} = recv_decode(6, Data, State1),
             {list_to_tuple(binary_to_list(DestAddr)), DestPort, State2, Data2};
         ?SOCKS5_ATYP_DOM ->
-            {<<DomLen:8/integer, Data2/binary>>, State2} = recv_decode(1, Data, State1),
+            {<<DomLen:8/big, Data2/binary>>, State2} = recv_decode(1, Data, State1),
             {<<Domain:DomLen/binary, DestPort:16/big, Data3/binary>>, State3} = recv_decode(DomLen+2, Data2, State2),
             {binary_to_list(Domain), DestPort, State3, Data3};
         _ ->

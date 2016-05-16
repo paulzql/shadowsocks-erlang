@@ -1,15 +1,12 @@
-%%% @author Yongke <wangyongke@gmail.com>
-%%% @copyright (C) 2013, Yongke
-%%% @doc
-%%% APIs for encrypt and decrypt
-%%% @end
-
 -module(shadowsocks_crypt).
 
 %% API
--export([init_cipher_info/2, encode/2, decode/2, key_iv_len/1, stream_init/3]).
+-export([methods/0, init_cipher_info/2, encode/2, decode/2, key_iv_len/1, stream_init/3]).
 
 -include("shadowsocks.hrl").
+
+methods() ->
+    [rc4_md5, table, aes_128_cfb, aes_192_cfb, aes_256_cfb].
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -18,10 +15,10 @@
 %% @spec cipher_info(Method, Password::string()) -> 
 %%                       {default, EncTable::list(), DecTable::list()} |
 %%                       {Method, Key::binary(), IvEnc::binary(), IvDec::binanry()}
-%%      Method := default | rc4 | des_cfb | chacha20_poly1305 | aes_cfb128
+%%      Method := table | rc4 | des_cfb | chacha20_poly1305 | aes_cfb128
 %% @end
 %%--------------------------------------------------------------------
-init_cipher_info(default, Password) ->
+init_cipher_info(table, Password) ->
     <<Value:64/little-unsigned-integer, _:64/little-unsigned-integer>> 
         = crypto:hash(md5,Password),
     Init = lists:seq(0, 255),
@@ -35,17 +32,17 @@ init_cipher_info(default, Password) ->
     ZipTable = lists:zip(Init, EncTable),
     ZipDecTable = lists:keysort(1, [{N, M} || {M, N} <- ZipTable]),
     DecTable = [M || {_, M} <- ZipDecTable],
-    #cipher_info{method=default, 
+    #cipher_info{method=table, 
                  table={list_to_tuple(EncTable), list_to_tuple(DecTable)}};
 
+ 
 init_cipher_info(Method, Password) ->
     {KeyLen, IvLen} = key_iv_len(Method),
-    {Key, Iv} = evp_bytestokey(md5, Password, KeyLen, IvLen),
+    {Key, _NewIv} = evp_bytestokey(Password, KeyLen, IvLen),
     %% use another random Iv, but not the one returned from evp_bytestokey()
-    %% Iv = crypto:rand_bytes(IvLen),
-    #cipher_info{method=Method, key=Key, encode_iv=Iv, decode_iv=undefined,
-                stream_enc_state = stream_init(Method, Key, Iv),
-                stream_dec_state = stream_init(Method, Key, Iv)}.
+    NewIv = crypto:rand_bytes(IvLen),
+    #cipher_info{method=Method, key=Key, encode_iv=NewIv, decode_iv=undefined,
+                stream_enc_state = stream_init(Method, Key, NewIv)}.
 
 %%--------------------------------------------------------------------
 %% @doc 
@@ -55,20 +52,21 @@ init_cipher_info(Method, Password) ->
 %%      Data := iolist() | binary()
 %% @end
 %%--------------------------------------------------------------------
-encode(#cipher_info{method=default, table={EncTable, _}}=CipherInfo, Data) ->
+encode(#cipher_info{method=table, table={EncTable, _}}=CipherInfo, Data) ->
     {CipherInfo, transform(EncTable, Data)};
-encode(#cipher_info{method=rc4, stream_enc_state=S}=CipherInfo, Data) ->
-    {S1, EncData} = crypto:stream_encrypt(S, Data),
-    {CipherInfo#cipher_info{stream_enc_state=S1}, EncData};
+
 encode(#cipher_info{iv_sent = false, encode_iv=Iv}=CipherInfo, Data) ->
     NewCipherInfo = CipherInfo#cipher_info{iv_sent=true},
     {NewCipherInfo1, EncData} = encode(NewCipherInfo, Data), 
     {NewCipherInfo1, <<Iv/binary, EncData/binary>>};
-encode(#cipher_info{method=des_cfb, key=Key, encode_iv=Iv}=CipherInfo, Data) ->
-    EncData = crypto:block_encrypt(des_cfb, Key, Iv, Data),
-    NextIv = crypto:next_iv(des_cfb, EncData, Iv),
-    {CipherInfo#cipher_info{encode_iv=NextIv}, EncData}.
 
+encode(#cipher_info{method=rc4_md5, stream_enc_state=S}=CipherInfo, Data) ->
+    {S1, EncData} = crypto:stream_encrypt(S, Data),
+    {CipherInfo#cipher_info{stream_enc_state=S1}, EncData};
+
+encode(#cipher_info{method=_Method, key=Key, encode_iv=Iv}=CipherInfo, Data) ->
+    EncData = crypto:block_encrypt(aes_cfb128, Key, Iv, Data),
+    {CipherInfo, EncData}.
 %%--------------------------------------------------------------------
 %% @doc 
 %% Decode function
@@ -79,15 +77,16 @@ encode(#cipher_info{method=des_cfb, key=Key, encode_iv=Iv}=CipherInfo, Data) ->
 %%      Data := iolist() | binary()
 %% @end
 %%--------------------------------------------------------------------
-decode(#cipher_info{method=default, table={_, DecTable}}=CipherInfo, EncData) ->
+decode(#cipher_info{method=table, table={_, DecTable}}=CipherInfo, EncData) ->
     {CipherInfo, transform(DecTable, EncData)};
-decode(#cipher_info{method=rc4, stream_dec_state=S}=CipherInfo, EncData) ->
+
+decode(#cipher_info{method=rc4_md5, stream_dec_state=S}=CipherInfo, EncData) ->
     {S1, Data} = crypto:stream_decrypt(S, EncData),
     {CipherInfo#cipher_info{stream_dec_state=S1}, Data};
-decode(#cipher_info{method=des_cfb, key=Key, decode_iv=Iv}=CipherInfo, EncData) ->
-    Data = crypto:block_decrypt(des_cfb, Key, Iv, EncData),
-    NextIv = crypto:next_iv(des_cfb, Data, Iv),
-    {CipherInfo#cipher_info{decode_iv=NextIv}, Data}.
+
+decode(#cipher_info{method=_Method, key=Key, decode_iv=Iv}=CipherInfo, EncData) ->
+    Data = crypto:block_decrypt(aes_cfb128, Key, Iv, EncData),
+    {CipherInfo, Data}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -112,30 +111,33 @@ transform(Table, Data) when is_list(Data) ->
 %%      {Key::binary(), Iv::binary()}
 %% @end
 %%--------------------------------------------------------------------
-evp_bytestokey(md5, Password, KeyLen, IvLen) ->
-    evp_bytestokey_aux(md5, list_to_binary(Password), KeyLen, IvLen, <<>>).
+evp_bytestokey(Password, KeyLen, IvLen) ->
+    evp_bytestokey_aux(list_to_binary(Password), KeyLen, IvLen, <<>>).
 
-evp_bytestokey_aux(md5, _, KeyLen, IvLen, Acc) 
-  when KeyLen + IvLen =< size(Acc) ->
+evp_bytestokey_aux(_, KeyLen, IvLen, Acc) when KeyLen + IvLen =< size(Acc) ->
     <<Key:KeyLen/binary, Iv:IvLen/binary, _/binary>> = Acc,
     {Key, Iv};
-evp_bytestokey_aux(md5, Password, KeyLen, IvLen, Acc) ->
+
+evp_bytestokey_aux(Password, KeyLen, IvLen, Acc) ->
     Digest = crypto:hash(md5, <<Acc/binary, Password/binary>>),
     NewAcc = <<Acc/binary, Digest/binary>>,
-    evp_bytestokey_aux(md5, Password, KeyLen, IvLen, NewAcc).
+    evp_bytestokey_aux(Password, KeyLen, IvLen, NewAcc).
 
-key_iv_len(des_cfb) ->
-    {8, 8};
-key_iv_len(rc4) ->
+
+key_iv_len(rc4_md5) ->
     {16, 16};
-key_iv_len(aes_cfb128) ->
+key_iv_len(aes_128_cfb) ->
     {16, 16};
-key_iv_len(chacha20_poly1305) ->
+key_iv_len(aes_192_cfb) ->
+    {24, 16};
+key_iv_len(aes_256_cfb) ->
+    {32, 16};
+key_iv_len(chacha20) ->
     {32, 8}.
 
 
-stream_init(rc4, Key, _) ->
-    crypto:stream_init(rc4, Key);
+stream_init(rc4_md5, Key, Iv) ->
+    crypto:stream_init(rc4, crypto:hash(md5, <<Key/binary, Iv/binary>>));
 stream_init(_, _, _) ->
     undefined.
 
@@ -145,16 +147,15 @@ stream_init(_, _, _) ->
 
 rc4_test() ->
 
-    Cipher = init_cipher_info(rc4, "pass"),
+    Cipher = init_cipher_info(aes_128_cfb, "xx"),
     Data1 = <<"hello world">>,
     Data2 = <<"baby">>,
     {Cipher1, EnData1} = encode(Cipher, Data1),
-    {Cipher2, EnData2} = encode(Cipher1, EnData1),
-
-    {Cipher3, DeData1} = decode(Cipher, EnData1),
+    {Cipher2, EnData2} = encode(Cipher1, Data2),
+    IV = Cipher1#cipher_info.encode_iv,
+    {Cipher3, <<_IV:16/binary, DeData1/binary>>} = decode(Cipher1#cipher_info{decode_iv=IV}, EnData1),
     {_,       DeData2} = decode(Cipher3, EnData2),
-    io:format("data:~p,~p~n", [binary_to_list(DeData1),binary_to_list(DeData2)]),
-    0 = (size(Data1) - size(EnData1)),
+    io:format("~p~n", [DeData1]),
     {0,11} = binary:match(Data1, [DeData1],[]),
     {0,4}  = binary:match(Data2, [DeData2],[]),
     ok.

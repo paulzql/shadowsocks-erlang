@@ -35,7 +35,13 @@ notify(Arg) ->
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    gen_event:start_link({local, ?SERVER}).
+    case gen_event:start_link({local, ?SERVER}) of
+        {ok, Pid} ->
+            add_handler(),
+            {ok, Pid};
+        Error ->
+            Error
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -76,7 +82,8 @@ init([]) ->
 %%                          remove_handler
 %% @end
 %%--------------------------------------------------------------------
-handle_event(_Event, State) ->
+handle_event(Event, State) ->
+    io:format("Event:~p~n", [Event]),
     {ok, State}.
 
 %%--------------------------------------------------------------------
