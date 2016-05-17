@@ -79,7 +79,7 @@ start_link(Args) ->
                                 addr_limit=AddrLimit, 
                                 password=Password, method=Method, 
                                 accepting=true},
-            gen_server:start_link({local, ?SERVER}, ?MODULE, [State,IP], [])
+            gen_server:start_link(?MODULE, [State,IP], [])
     end.
 
 get_port(Pid) ->
@@ -143,6 +143,9 @@ init([State,IP]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_call(get_port, _From, State=#state{port=Port}) ->
+    {reply, {ok, Port}, State};
+
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
