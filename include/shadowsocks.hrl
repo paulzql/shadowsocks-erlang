@@ -33,12 +33,25 @@
 
 %% cipher info
 -record(cipher_info, {
-          method=default,      %% default | rc4 | aes_128_cfb | bf_cfb | des_cfb
-          table = {[], []},    %% table for default method only
+          method=default,      %% table | rc4 | aes_128_cfb | des_cfb | aes_192_cfb | aes_256_cfb
+          table = {[], []},    %% table for table method only
           key,
           encode_iv,
           iv_sent = false,     %% true | false
           decode_iv,
           stream_enc_state,    %% used in AES CTR and RC4 mode
           stream_dec_state     %% used in AES CTR and RC4 mode
+         }).
+
+-record(conn_config, {
+          type,         % 类型     client | server | bridge | proxy
+          local_port,   % 本地端口
+          remote_port,  % 远程端口
+          local_addr,   % 本地IP
+          remote_addr,  % 远程端口
+          conn_limit,   % 连接数限制
+          flow_limit,   % 单连接流量限制
+          addr_limit,   % IP数据限制
+          password,     % 密码
+          method        % 加密类型
          }).

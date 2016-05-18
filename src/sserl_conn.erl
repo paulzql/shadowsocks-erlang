@@ -20,7 +20,7 @@
 -include("shadowsocks.hrl").
 
 -define(SERVER, ?MODULE).
--define(RECV_TIMOUT, 15000).
+-define(RECV_TIMOUT, 180000).
 
 -record(state, {
           csocket,

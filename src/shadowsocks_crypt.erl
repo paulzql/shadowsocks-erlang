@@ -6,7 +6,7 @@
 -include("shadowsocks.hrl").
 
 methods() ->
-    [rc4_md5, table, aes_128_cfb, aes_192_cfb, aes_256_cfb].
+    [rc4_md5, table, aes_128_cfb, aes_192_cfb, aes_256_cfb, none].
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -35,7 +35,9 @@ init_cipher_info(table, Password) ->
     #cipher_info{method=table, 
                  table={list_to_tuple(EncTable), list_to_tuple(DecTable)}};
 
- 
+ init_cipher_info(none, _) ->
+    ok;
+
 init_cipher_info(Method, Password) ->
     {KeyLen, IvLen} = key_iv_len(Method),
     {Key, _NewIv} = evp_bytestokey(Password, KeyLen, IvLen),
@@ -52,6 +54,9 @@ init_cipher_info(Method, Password) ->
 %%      Data := iolist() | binary()
 %% @end
 %%--------------------------------------------------------------------
+encode(#cipher_info{method=none}, Data) ->
+    Data;
+
 encode(#cipher_info{method=table, table={EncTable, _}}=CipherInfo, Data) ->
     {CipherInfo, transform(EncTable, Data)};
 
@@ -77,6 +82,9 @@ encode(#cipher_info{method=_Method, key=Key, encode_iv=Iv}=CipherInfo, Data) ->
 %%      Data := iolist() | binary()
 %% @end
 %%--------------------------------------------------------------------
+decode(#cipher_info{method=none}, Data) ->
+    Data;
+
 decode(#cipher_info{method=table, table={_, DecTable}}=CipherInfo, EncData) ->
     {CipherInfo, transform(DecTable, EncData)};
 
@@ -124,6 +132,8 @@ evp_bytestokey_aux(Password, KeyLen, IvLen, Acc) ->
     evp_bytestokey_aux(Password, KeyLen, IvLen, NewAcc).
 
 
+key_iv_len(none) ->
+    {0, 0};
 key_iv_len(rc4_md5) ->
     {16, 16};
 key_iv_len(aes_128_cfb) ->
