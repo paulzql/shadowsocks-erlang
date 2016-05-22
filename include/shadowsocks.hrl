@@ -43,15 +43,4 @@
           stream_dec_state     %% used in AES CTR and RC4 mode
          }).
 
--record(conn_config, {
-          type,         % 类型     client | server | bridge | proxy
-          local_port,   % 本地端口
-          remote_port,  % 远程端口
-          local_addr,   % 本地IP
-          remote_addr,  % 远程端口
-          conn_limit,   % 连接数限制
-          flow_limit,   % 单连接流量限制
-          addr_limit,   % IP数据限制
-          password,     % 密码
-          method        % 加密类型
-         }).
+

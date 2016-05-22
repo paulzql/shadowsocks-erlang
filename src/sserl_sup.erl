@@ -31,8 +31,10 @@ init([]) ->
                   transient, brutal_kill, supervisor, [sserl_listener_sup]},
     Stat = {sserl_stat, {sserl_stat, start_link, []},
             transient, brutal_kill, worker, dynamic},
+    Config = {sserl_config, {sserl_config, start_link, []},
+            transient, brutal_kill, worker, [sserl_config]},
     {ok, { {one_for_one, 2, 10}, 
-           [Stat, ListenerSup]} }.
+           [Stat, ListenerSup, Config]} }.
 
 %%====================================================================
 %% Internal functions

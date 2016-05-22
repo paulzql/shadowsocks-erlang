@@ -11,14 +11,14 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1,get_port/1]).
+-export([start_link/1, get_port/1, update/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
--define(MAX_LIMIT, 16#0FFFFFFF).
+-define(MAX_LIMIT, 16#0FFFFFFFFFFFFFFF).
 
 -record(state, {
           type,         % 类型
@@ -26,10 +26,15 @@
           lsocket,      % 监听Socket
           conn_limit,   % 连接数限制
           flow_limit,   % 单连接流量限制
-          addr_limit,   % IP数据限制
+          max_flow,     % 最大流量
+          expire_time,  % 失效时间
           password,     % 密码
           method,       % 加密类型
-          accepting     % 是否正在接收新连接
+          accepting,     % 是否正在接收新连接
+          conns = 0,    % 连接数
+          flow = 0,     % 流量
+          reported_flow = 0, % 已上报流量
+          expire_timer = undefined % 过期时钟
 }).
 
 %%%===================================================================
@@ -48,7 +53,8 @@ start_link(Args) ->
     Port       = proplists:get_value(port, Args),
     ConnLimit  = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
     FlowLimit  = proplists:get_value(flow_limit,  Args, ?MAX_LIMIT),
-    AddrLimit  = proplists:get_value(addr_limit,  Args, ?MAX_LIMIT),
+    MaxFlow    = proplists:get_value(max_flow, Args, ?MAX_LIMIT),
+    ExpireTime = proplists:get_value(expire_time, Args, ?MAX_LIMIT),
     Type       = proplists:get_value(type, Args, server),
     Password  = proplists:get_value(password, Args),
     Method     = proplists:get_value(method, Args, table),
@@ -64,8 +70,6 @@ start_link(Args) ->
             {error, {badargs, conn_limit_need_integer}};
         not is_integer(FlowLimit) ->
             {error, {badargs, flow_limit_need_integer}};
-        not is_integer(AddrLimit) ->
-            {error, {badargs, addr_limit_need_integer}};
         Type =/= server andalso Type =/= client ->
             {error, {badargs, error_type}};
         not ValidMethod ->
@@ -74,16 +78,20 @@ start_link(Args) ->
             {error, {badargs, password_need_list}};
         true ->
             State = #state{type=Type, port=Port, lsocket=undefined, 
-                                conn_limit=ConnLimit, 
-                                flow_limit=FlowLimit, 
-                                addr_limit=AddrLimit, 
-                                password=Password, method=Method, 
-                                accepting=true},
+                           conn_limit=ConnLimit, 
+                           flow_limit=FlowLimit, 
+                           max_flow=MaxFlow,
+                           expire_time=ExpireTime,
+                           password=Password, method=Method, 
+                           expire_timer=erlang:start_timer(ExpireTime, self(), expire, [{abs,true}])},
             gen_server:start_link(?MODULE, [State,IP], [])
     end.
 
 get_port(Pid) ->
     gen_server:call(Pid, get_port).
+
+update(Pid, Args) ->
+    gen_server:call(Pid, {update, Args}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -102,7 +110,6 @@ get_port(Pid) ->
 %%--------------------------------------------------------------------
 init([State,IP]) ->
     process_flag(trap_exit, true),
-
 
     Opts = [binary, {backlog, 20},{nodelay, true}, {active, false}, 
             {packet, raw}, {reuseaddr, true},{send_timeout_close, true}],
@@ -144,7 +151,25 @@ init([State,IP]) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_call(get_port, _From, State=#state{port=Port}) ->
-    {reply, {ok, Port}, State};
+    {reply, Port, State};
+
+handle_call({update, Args}, _From, State) ->
+    ConnLimit  = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
+    FlowLimit  = proplists:get_value(flow_limit,  Args, ?MAX_LIMIT),
+    MaxFlow    = proplists:get_value(max_flow, Args, ?MAX_LIMIT),
+    ExpireTime = proplists:get_value(expire_time, Args, ?MAX_LIMIT),
+    Password  = proplists:get_value(password, Args),
+    Method     = proplists:get_value(method, Args, table),    
+
+    erlang:cancel_timer(State#state.expire_timer, []),
+    ExpireTimer = erlang:start_timer(ExpireTime, self(), expire, [{abs,true}]),
+    {reply, ok, State#state{conn_limit = ConnLimit,
+                     flow_limit = FlowLimit,
+                     max_flow   = MaxFlow,
+                     expire_time= ExpireTime,
+                     password   = Password,
+                     method     = Method,
+                     expire_timer=ExpireTimer}};
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
@@ -173,8 +198,12 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+%% 超过使用期，停止进程
+handle_info({timeout, _Ref, expire}, State) ->
+    {stop, expire, State};
+
 handle_info({inet_async, _LSocket, _Ref, {ok, CSocket}}, 
-            State=#state{type=Type, port=Port,method=Method, password=Password,flow_limit=FlowLimit}) ->
+            State=#state{type=Type, port=Port,method=Method, password=Password,flow_limit=FlowLimit,conns=Conns}) ->
     true = inet_db:register_socket(CSocket, inet_tcp), 
     {ok, {Addr, _}} = inet:peername(CSocket),
     sserl_stat:notify({listener, accept, Port, Addr}),
@@ -189,13 +218,23 @@ handle_info({inet_async, _LSocket, _Ref, {ok, CSocket}},
     end,
     case prim_inet:async_accept(State#state.lsocket, -1) of
         {ok, _} ->
-            {noreply, State};
+            {noreply, State#state{conns=Conns+1}};
         {error, Ref} ->
-            {stop, {async_accept, inet:format_error(Ref)}, State}
+            {stop, {async_accept, inet:format_error(Ref)}, State#state{conns=Conns+1}}
     end;
 
 handle_info({inet_async, _LSocket, _Ref, Error}, State) ->
     {stop, Error, State};
+
+%% 流量超了，结束进程
+handle_info({report_flow, _Pid, _ConnFlow}, State=#state{flow=Flow,max_flow=MaxFlow}) when Flow >= MaxFlow ->
+    {stop, exceed_flow, State};
+handle_info({report_flow, _Pid, ConnFlow}, State=#state{flow=Flow}) ->
+    {noreply, State#state{flow=Flow+ConnFlow}};
+
+handle_info({'EXIT', _Pid, _Reason}, State = #state{conns=Conns,port=Port,flow=Flow,reported_flow=RFlow}) ->
+    sserl_config:add_flow(Port, Flow-RFlow),
+    {noreply, State#state{conns=Conns-1, reported_flow=Flow}};
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -211,7 +250,8 @@ handle_info(_Info, State) ->
 %% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _State) ->
+terminate(_Reason, #state{port=Port,flow=Flow,reported_flow=RFlow}) ->
+    sserl_config:add_flow(Port, Flow-RFlow),
     ok.
 
 %%--------------------------------------------------------------------
@@ -228,6 +268,3 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-
-    

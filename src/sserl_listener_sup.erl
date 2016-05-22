@@ -22,7 +22,16 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 start(Args) ->
-    supervisor:start_child(?SERVER, [Args]).
+    Port = proplists:get_value(port, Args),
+    Children = supervisor:which_children(?SERVER),
+    case [P || {_, P, _, _} <- Children, is_pid(P), sserl_listener:get_port(P) =:= Port] of
+        [Pid] ->
+            sserl_listener:update(Pid, Args);
+        _ ->
+            supervisor:start_child(?SERVER, [Args])
+    end.
+
+
 %%====================================================================
 %% Supervisor callbacks
 %%====================================================================

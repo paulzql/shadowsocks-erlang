@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2, init/2]).
+-export([start_link/2, init/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -21,13 +21,16 @@
 
 -define(SERVER, ?MODULE).
 -define(RECV_TIMOUT, 180000).
+-define(REPORT_INTERVAL, 1000).
 
 -record(state, {
+          listener,
           csocket,
           ssocket,
           type,
           limit,
-          cipher_info
+          cipher_info,
+          flow = 0
 }).
 
 %%%===================================================================
@@ -42,13 +45,13 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(Socket, Info) ->
-    proc_lib:start_link(?MODULE, init, [Socket, Info]).
+    proc_lib:start_link(?MODULE, init, [self(), Socket, Info]).
     %% gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-init(Socket, {Type, Method, Password, Limit}) ->
+init(Parent, Socket, {Type, Method, Password, Limit}) ->
     proc_lib:init_ack({ok, self()}),
     wait_socket(Socket),
-    State = #state{csocket=Socket, ssocket=undefined, 
+    State = #state{listener=Parent, csocket=Socket, ssocket=undefined, 
                    type=Type, limit=Limit,
                    cipher_info=shadowsocks_crypt:init_cipher_info(Method, Password)},
     loop(State).
@@ -62,6 +65,7 @@ loop(State=#state{type=server, csocket=CSocket}) ->
         {ok, SSocket} ->
             gen_tcp:send(SSocket, Data),
             inet:setopts(CSocket, [{active, once}]),
+            erlang:send_after(?REPORT_INTERVAL, self(), report_flow),
             gen_server:enter_loop(?MODULE, [], State2#state{ssocket=SSocket});
         {error, Reason} ->
             exit(Reason)
@@ -131,21 +135,26 @@ handle_cast(_Msg, State) ->
 %%--------------------------------------------------------------------
 %% 客户端来的数据
 handle_info({tcp, CSocket, Data}, 
-            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo}) ->
+            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo,flow=Flow}) ->
     inet:setopts(CSocket, [{active, once}]),
     {CipherInfo1, DecData} = shadowsocks_crypt:decode(CipherInfo, Data),
     gen_tcp:send(SSocket, DecData),
-    {noreply, State#state{cipher_info=CipherInfo1}};
+    {noreply, State#state{cipher_info=CipherInfo1}, flow=Flow+size(Data)};
 %% 服务端来的数据
 handle_info({tcp, SSocket, Data}, 
-            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo}) ->
+            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo, flow=Flow}) ->
     inet:setopts(SSocket, [{active, once}]),
     {CipherInfo1, EncData} = shadowsocks_crypt:encode(CipherInfo, Data),
     gen_tcp:send(CSocket, EncData),
-    {noreply, State#state{cipher_info=CipherInfo1}};
+    {noreply, State#state{cipher_info=CipherInfo1}, flow=Flow+size(Data)};
 
 handle_info({tcp_closed, _Socket}, State) ->
     {stop, normal, State};
+
+handle_info(report_flow, State = #state{listener=Listener, flow=Flow}) when flow > 0 ->
+    State#state.listener ! {report_flow, self(), State#state.flow},
+    erlang:send_after(?REPORT_INTERVAL, self(), report_flow),
+    {noreply, State#state{flow=0}};
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -161,7 +170,8 @@ handle_info(_Info, State) ->
 %% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _State) ->
+terminate(_Reason, State) ->
+    State#state.listener ! {report_flow, self(), State#state.flow},
     ok.
 
 %%--------------------------------------------------------------------
