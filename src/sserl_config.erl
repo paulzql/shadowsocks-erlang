@@ -58,7 +58,7 @@ add_limit({Port, MaxFlow, ExpireTime}) when
                 case mnesia:wread({sserl_config, Port}) of
                     [Conf=#sserl_config{limit=Limit, flow=Flow}] ->
                         OldMaxFlow = proplists:get_value(max_flow, Limit, Flow),
-                        OldExpireTime=proplists:get_value(expire_time, Limit, os:system_time()),
+                        OldExpireTime=proplists:get_value(expire_time, Limit, os:system_time(milli_seconds)),
                         Limit1 = case MaxFlow of
                                      0 ->
                                          Limit;
@@ -133,10 +133,18 @@ get_all() ->
 
 %% 加载启动的配置
 load_startup() ->
+    CurrTime = os:system_time(milli_seconds),
     L = lists:filter(fun(C)->
                          case {C#sserl_config.nodes, C#sserl_config.startup} of
                              {all, true} ->
-                                 true;
+                                 case proplists:get_value(expire_time, C#sserl_config.limit) of
+                                     undefined ->
+                                         true;
+                                     T when T > CurrTime ->
+                                         true;
+                                     _ ->
+                                         false
+                                 end;
                              {Nodes, true} when is_list(Nodes) ->
                                  lists:any(fun(N) -> N =:= node() end, Nodes);
                              _ ->
@@ -205,7 +213,7 @@ handle_cast({add_flow, Port, Flow}, State) ->
     F = fun() ->
                 case mnesia:wread({sserl_config, Port}) of
                     [#sserl_config{flow=OldFlow}=Conf] ->
-                        mnesia:write(Conf#sserl_config{flow=OldFlow+Flow,last_time=os:system_time()});
+                        mnesia:write(Conf#sserl_config{flow=OldFlow+Flow,last_time=os:system_time(milli_seconds)});
                     _ ->
                         {error, no_port}
                 end
@@ -217,7 +225,7 @@ handle_cast({add_flow, Port, Flow}, State) ->
     {noreply, State};
 
 handle_cast({log, Port, Op, Desc}, State) ->
-    Log = #sserl_config_log{port=Port, op=Op, desc=Desc, time=os:system_time()},
+    Log = #sserl_config_log{port=Port, op=Op, desc=Desc, time=os:system_time(milli_seconds)},
     mnesia:dirty_write(Log),
     {noreply, State};
         

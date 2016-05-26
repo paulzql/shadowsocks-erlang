@@ -54,11 +54,12 @@ start_link(Args) ->
     ConnLimit  = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
     FlowLimit  = proplists:get_value(flow_limit,  Args, ?MAX_LIMIT),
     MaxFlow    = proplists:get_value(max_flow, Args, ?MAX_LIMIT),
-    ExpireTime = proplists:get_value(expire_time, Args, ?MAX_LIMIT),
+    ExpireTime = proplists:get_value(expire_time, Args, max_time()),
     Type       = proplists:get_value(type, Args, server),
     Password  = proplists:get_value(password, Args),
     Method     = proplists:get_value(method, Args, table),
     IP        = proplists:get_value(ip, Args, undefined),
+    CurrTime  = os:system_time(milli_seconds),
     %% 校验参数
     ValidMethod = lists:any(fun(M) -> M =:= Method end, shadowsocks_crypt:methods()),
     if
@@ -76,6 +77,8 @@ start_link(Args) ->
             {error, {badargs, unsupported_method}};
         not is_list(Password) ->
             {error, {badargs, password_need_list}};
+        CurrTime >= ExpireTime ->
+            {error, expired};
         true ->
             State = #state{type=Type, port=Port, lsocket=undefined, 
                            conn_limit=ConnLimit, 
@@ -83,7 +86,7 @@ start_link(Args) ->
                            max_flow=MaxFlow,
                            expire_time=ExpireTime,
                            password=Password, method=Method, 
-                           expire_timer=erlang:start_timer(ExpireTime, self(), expire, [{abs,true}])},
+                           expire_timer=erlang:start_timer(max_time(ExpireTime), self(), expire, [{abs,true}])},
             gen_server:start_link(?MODULE, [State,IP], [])
     end.
 
@@ -162,7 +165,7 @@ handle_call({update, Args}, _From, State) ->
     Method     = proplists:get_value(method, Args, table),    
 
     erlang:cancel_timer(State#state.expire_timer, []),
-    ExpireTimer = erlang:start_timer(ExpireTime, self(), expire, [{abs,true}]),
+    ExpireTimer = erlang:start_timer(max_time(ExpireTime), self(), expire, [{abs,true}]),
     {reply, ok, State#state{conn_limit = ConnLimit,
                      flow_limit = FlowLimit,
                      max_flow   = MaxFlow,
@@ -268,3 +271,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+max_time() ->
+    erlang:convert_time_unit(erlang:system_info(end_time), native, milli_seconds).
+max_time(Time) ->
+    erlang:min(Time, max_time()).

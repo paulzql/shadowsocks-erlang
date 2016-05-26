@@ -33,14 +33,15 @@ stop(_State) ->
 start_listeners() ->
     {ok, App} = application:get_application(),
     Listeners = application:get_env(App, listeners, []),
-    lists:map(fun({Name, Args}) ->
+    Listeners1 = Listeners ++ sserl_config:load_startup(),
+    lists:map(fun(Args) ->
                       case sserl_listener_sup:start(Args) of
                           {ok, Pid} ->
-                              error_logger:info_msg("~p start listener ~p ok (pid:~p)", [?MODULE, Name, Pid]),
+                              error_logger:info_msg("~p start listener ~p ok (pid:~p)", [?MODULE, Args, Pid]),
                               ok;
                           Error ->
-                              error_logger:error_msg("~p start listener ~p error:~p", [?MODULE, Name, Error]),
+                              error_logger:error_msg("~p start listener ~p error:~p", [?MODULE, Args, Error]),
                               throw({error, Error})
                       end
-              end, Listeners),
+              end, Listeners1),
     ok.
