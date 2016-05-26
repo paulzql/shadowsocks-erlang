@@ -40,7 +40,9 @@
           iv_sent = false,     %% true | false
           decode_iv,
           stream_enc_state,    %% used in AES CTR and RC4 mode
-          stream_dec_state     %% used in AES CTR and RC4 mode
+          stream_dec_state,     %% used in AES CTR and RC4 mode
+          enc_rest = <<>>,
+          dec_rest = <<>>
          }).
 
 

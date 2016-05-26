@@ -61,7 +61,7 @@ loop(State=#state{type=server, csocket=CSocket}) ->
     State1 = recv_ivec(State),
     {Addr, Port, State2, Data} = recv_target(State1),
     sserl_stat:notify({conn, new, Addr, Port}),
-    case gen_tcp:connect(Addr, Port, [binary, {packet, raw}, {active, once},{nodelay, true}]) of
+    case gen_tcp:connect(Addr, Port, [binary, {packet, raw}, {active, once},{nodelay, false}]) of
         {ok, SSocket} ->
             gen_tcp:send(SSocket, Data),
             inet:setopts(CSocket, [{active, once}]),
@@ -139,19 +139,19 @@ handle_info({tcp, CSocket, Data},
     inet:setopts(CSocket, [{active, once}]),
     {CipherInfo1, DecData} = shadowsocks_crypt:decode(CipherInfo, Data),
     gen_tcp:send(SSocket, DecData),
-    {noreply, State#state{cipher_info=CipherInfo1}, flow=Flow+size(Data)};
+    {noreply, State#state{cipher_info=CipherInfo1, flow=Flow+size(Data)}};
 %% 服务端来的数据
 handle_info({tcp, SSocket, Data}, 
             State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo, flow=Flow}) ->
     inet:setopts(SSocket, [{active, once}]),
     {CipherInfo1, EncData} = shadowsocks_crypt:encode(CipherInfo, Data),
     gen_tcp:send(CSocket, EncData),
-    {noreply, State#state{cipher_info=CipherInfo1}, flow=Flow+size(Data)};
+    {noreply, State#state{cipher_info=CipherInfo1, flow=Flow+size(Data)}};
 
 handle_info({tcp_closed, _Socket}, State) ->
     {stop, normal, State};
 
-handle_info(report_flow, State = #state{listener=Listener, flow=Flow}) when flow > 0 ->
+handle_info(report_flow, State = #state{flow=Flow}) when Flow > 0 ->
     State#state.listener ! {report_flow, self(), State#state.flow},
     erlang:send_after(?REPORT_INTERVAL, self(), report_flow),
     {noreply, State#state{flow=0}};

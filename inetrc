@@ -1,0 +1,4 @@
+%% -*- mode:erlang -*-
+{lookup, [dns]}.
+{timeout, 5000}.
+{nameserver, {127,0,0,1}, 53}.

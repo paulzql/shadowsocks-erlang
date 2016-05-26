@@ -69,9 +69,19 @@ encode(#cipher_info{method=rc4_md5, stream_enc_state=S}=CipherInfo, Data) ->
     {S1, EncData} = crypto:stream_encrypt(S, Data),
     {CipherInfo#cipher_info{stream_enc_state=S1}, EncData};
 
-encode(#cipher_info{method=_Method, key=Key, encode_iv=Iv}=CipherInfo, Data) ->
-    EncData = crypto:block_encrypt(aes_cfb128, Key, Iv, Data),
-    {CipherInfo, EncData}.
+encode(#cipher_info{method=_Method, key=Key, encode_iv=Iv, enc_rest=Rest}=CipherInfo, Data) ->
+    DataSize = size(Data),
+    RestSize = size(Rest),
+    BufLen = (DataSize+RestSize) div 16 * 16,
+    
+    <<Data2:BufLen/binary, Rest2/binary>> = <<Rest/binary, Data/binary>>,
+    EncData = crypto:block_encrypt(aes_cfb128, Key, Iv, Data2),
+    NewIv = binary:part(<<Iv/binary, EncData/binary>>, size(EncData)+16, -16),
+    EncRest = crypto:block_encrypt(aes_cfb128, Key, NewIv, Rest2),
+    Result = binary:part(<<EncData/binary, EncRest/binary>>, RestSize, DataSize),
+    {CipherInfo#cipher_info{encode_iv=NewIv, enc_rest=Rest2}, Result}.
+
+
 %%--------------------------------------------------------------------
 %% @doc 
 %% Decode function
@@ -92,9 +102,18 @@ decode(#cipher_info{method=rc4_md5, stream_dec_state=S}=CipherInfo, EncData) ->
     {S1, Data} = crypto:stream_decrypt(S, EncData),
     {CipherInfo#cipher_info{stream_dec_state=S1}, Data};
 
-decode(#cipher_info{method=_Method, key=Key, decode_iv=Iv}=CipherInfo, EncData) ->
-    Data = crypto:block_decrypt(aes_cfb128, Key, Iv, EncData),
-    {CipherInfo, Data}.
+decode(#cipher_info{method=_Method, key=Key, decode_iv=Iv, dec_rest=Rest}=CipherInfo, EncData) ->
+    DataSize = size(EncData),
+    RestSize = size(Rest),
+    BufLen = (DataSize+RestSize) div 16 * 16,
+    <<EncData2:BufLen/binary, Rest2/binary>> = <<Rest/binary, EncData/binary>>,
+
+    Data = crypto:block_decrypt(aes_cfb128, Key, Iv, EncData2),
+    NewIv = binary:part(<<Iv/binary, EncData2/binary>>, size(EncData2)+16, -16),
+    DecRest = crypto:block_decrypt(aes_cfb128, Key, NewIv, Rest2),
+    Result = binary:part(<<Data/binary, DecRest/binary>>, RestSize, DataSize),
+
+    {CipherInfo#cipher_info{decode_iv=NewIv, dec_rest=Rest2}, Result}.
 
 %%--------------------------------------------------------------------
 %% @doc

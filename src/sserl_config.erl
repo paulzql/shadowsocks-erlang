@@ -125,10 +125,8 @@ get_all() ->
     case catch mnesia:transaction(F) of
         {atomic, Res} ->
             Res;
-        {'EXIT', Reason} ->
-            {error, Reason};
-        Error ->
-            Error
+        _ ->
+            []
     end.
 
 %% 加载启动的配置

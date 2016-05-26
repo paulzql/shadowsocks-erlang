@@ -114,7 +114,7 @@ update(Pid, Args) ->
 init([State,IP]) ->
     process_flag(trap_exit, true),
 
-    Opts = [binary, {backlog, 20},{nodelay, true}, {active, false}, 
+    Opts = [binary, {backlog, 20},{nodelay, false}, {active, false}, 
             {packet, raw}, {reuseaddr, true},{send_timeout_close, true}],
     %% 获取IP地址
     Opts1 = case IP of
@@ -236,7 +236,7 @@ handle_info({report_flow, _Pid, ConnFlow}, State=#state{flow=Flow}) ->
     {noreply, State#state{flow=Flow+ConnFlow}};
 
 handle_info({'EXIT', _Pid, _Reason}, State = #state{conns=Conns,port=Port,flow=Flow,reported_flow=RFlow}) ->
-    sserl_config:add_flow(Port, Flow-RFlow),
+    sserl_config:report_flow(Port, Flow-RFlow),
     {noreply, State#state{conns=Conns-1, reported_flow=Flow}};
 
 handle_info(_Info, State) ->
@@ -254,7 +254,7 @@ handle_info(_Info, State) ->
 %% @end
 %%--------------------------------------------------------------------
 terminate(_Reason, #state{port=Port,flow=Flow,reported_flow=RFlow}) ->
-    sserl_config:add_flow(Port, Flow-RFlow),
+    sserl_config:report_flow(Port, Flow-RFlow),
     ok.
 
 %%--------------------------------------------------------------------
