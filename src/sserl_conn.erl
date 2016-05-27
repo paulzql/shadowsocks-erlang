@@ -61,7 +61,7 @@ loop(State=#state{type=server, csocket=CSocket}) ->
     State1 = recv_ivec(State),
     {Addr, Port, State2, Data} = recv_target(State1),
     sserl_stat:notify({conn, new, Addr, Port}),
-    case gen_tcp:connect(Addr, Port, [binary, {packet, raw}, {active, once},{nodelay, false}]) of
+    case gen_tcp:connect(Addr, Port, [binary, {packet, raw}, {active, once},{nodelay, true}]) of
         {ok, SSocket} ->
             gen_tcp:send(SSocket, Data),
             inet:setopts(CSocket, [{active, once}]),

@@ -114,7 +114,7 @@ update(Pid, Args) ->
 init([State,IP]) ->
     process_flag(trap_exit, true),
 
-    Opts = [binary, {backlog, 20},{nodelay, false}, {active, false}, 
+    Opts = [binary, {backlog, 20},{nodelay, true}, {active, false}, 
             {packet, raw}, {reuseaddr, true},{send_timeout_close, true}],
     %% 获取IP地址
     Opts1 = case IP of
