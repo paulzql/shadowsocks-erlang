@@ -30,7 +30,8 @@
           type,
           limit,
           cipher_info,
-          flow = 0
+          flow = 0,
+          sending = 0
 }).
 
 %%%===================================================================
@@ -135,21 +136,40 @@ handle_cast(_Msg, State) ->
 %%--------------------------------------------------------------------
 %% 客户端来的数据
 handle_info({tcp, CSocket, Data}, 
-            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo,flow=Flow}) ->
+            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo,flow=Flow,sending=S}) ->
     inet:setopts(CSocket, [{active, once}]),
     {CipherInfo1, DecData} = shadowsocks_crypt:decode(CipherInfo, Data),
-    gen_tcp:send(SSocket, DecData),
-    {noreply, State#state{cipher_info=CipherInfo1, flow=Flow+size(Data)}};
+    S1 = try erlang:port_command(SSocket, DecData) of
+        _ -> S+1
+    catch _E -> S
+    end,
+    %% gen_tcp:send(SSocket, DecData),
+    {noreply, State#state{cipher_info=CipherInfo1, flow=Flow+size(Data), sending=S1}};
 %% 服务端来的数据
 handle_info({tcp, SSocket, Data}, 
-            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo, flow=Flow}) ->
+            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo, flow=Flow,sending=S}) ->
     inet:setopts(SSocket, [{active, once}]),
     {CipherInfo1, EncData} = shadowsocks_crypt:encode(CipherInfo, Data),
-    gen_tcp:send(CSocket, EncData),
-    {noreply, State#state{cipher_info=CipherInfo1, flow=Flow+size(Data)}};
+    S1 = try erlang:port_command(CSocket, EncData) of
+        _ -> S+1
+    catch _E -> S
+    end,
+    %% gen_tcp:send(CSocket, EncData),
+    {noreply, State#state{cipher_info=CipherInfo1, flow=Flow+size(Data), sending=S1}};
 
-handle_info({tcp_closed, _Socket}, State) ->
+handle_info({inet_reply, _Socket, _Error}, State = #state{csocket=undefined,sending=1}) ->
     {stop, normal, State};
+handle_info({inet_reply, _Socket, _Error}, State = #state{ssocket=undefined, sending=1}) ->
+    {stop, normal, State};
+handle_info({inet_reply, _, _}, State = #state{sending=N}) ->
+    {noreply, State#state{sending=N-1}};
+
+handle_info({tcp_closed, _Socket}, State = #state{sending=0}) ->
+    {stop, normal, State};
+handle_info({tcp_closed, CSocket}, State = #state{csocket=CSocket}) ->
+    {noreply, State#state{csocket=undefined}};
+handle_info({tcp_closed, SSocket}, State = #state{ssocket=SSocket}) ->
+    {noreply, State#state{ssocket=undefined}};
 
 handle_info(report_flow, State = #state{flow=Flow}) when Flow > 0 ->
     State#state.listener ! {report_flow, self(), State#state.flow},

@@ -3,4 +3,4 @@
 # by paul <>
 #---------------------------------------------
 
-erl -pa . -pa _build/default/lib/mnesia_cluster/ebin -pa _build/default/lib/sserl/ebin -kernel inetrc inetrc -run sserl start
+erl +K true -pa . -pa _build/default/lib/mnesia_cluster/ebin -pa _build/default/lib/sserl/ebin -kernel inetrc inetrc -run sserl start
