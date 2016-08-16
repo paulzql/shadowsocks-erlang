@@ -11,26 +11,28 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2, init/3]).
+-export([start_link/2, init/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
 -include("shadowsocks.hrl").
+-include("sserl.hrl").
 
 -define(SERVER, ?MODULE).
 -define(RECV_TIMOUT, 180000).
 -define(REPORT_INTERVAL, 1000).
+-define(REPORT_MIN,   10485760). % 10MB
 
 -record(state, {
-          listener,
           csocket,
           ssocket,
           type,
-          limit,
+          port,
           cipher_info,
-          flow = 0,
+          down = 0,
+          up   = 0,
           sending = 0
 }).
 
@@ -46,14 +48,14 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(Socket, Info) ->
-    proc_lib:start_link(?MODULE, init, [self(), Socket, Info]).
+    proc_lib:start_link(?MODULE, init, [Socket, Info]).
     %% gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-init(Parent, Socket, {Type, Method, Password, Limit}) ->
+init(Socket, {Type, Method, Password, Port}) ->
     proc_lib:init_ack({ok, self()}),
     wait_socket(Socket),
-    State = #state{listener=Parent, csocket=Socket, ssocket=undefined, 
-                   type=Type, limit=Limit,
+    State = #state{csocket=Socket, ssocket=undefined, 
+                   type=Type, port=Port,
                    cipher_info=shadowsocks_crypt:init_cipher_info(Method, Password)},
     loop(State).
 
@@ -61,7 +63,7 @@ init(Parent, Socket, {Type, Method, Password, Limit}) ->
 loop(State=#state{type=server, csocket=CSocket}) ->
     State1 = recv_ivec(State),
     {Addr, Port, State2, Data} = recv_target(State1),
-    sserl_stat:notify({conn, new, Addr, Port}),
+    gen_event:notify(?STAT_EVENT, {conn, new, Addr, Port}),
     case gen_tcp:connect(Addr, Port, [binary, {packet, raw}, {active, once},{nodelay, true}]) of
         {ok, SSocket} ->
             gen_tcp:send(SSocket, Data),
@@ -136,7 +138,7 @@ handle_cast(_Msg, State) ->
 %%--------------------------------------------------------------------
 %% 客户端来的数据
 handle_info({tcp, CSocket, Data}, 
-            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo,flow=Flow,sending=S}) ->
+            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo,up=Flow,sending=S}) ->
     inet:setopts(CSocket, [{active, once}]),
     {CipherInfo1, DecData} = shadowsocks_crypt:decode(CipherInfo, Data),
     S1 = try erlang:port_command(SSocket, DecData) of
@@ -144,10 +146,10 @@ handle_info({tcp, CSocket, Data},
     catch _E -> S
     end,
     %% gen_tcp:send(SSocket, DecData),
-    {noreply, State#state{cipher_info=CipherInfo1, flow=Flow+size(Data), sending=S1}};
+    {noreply, State#state{cipher_info=CipherInfo1, up=Flow+size(Data), sending=S1}};
 %% 服务端来的数据
 handle_info({tcp, SSocket, Data}, 
-            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo, flow=Flow,sending=S}) ->
+            State=#state{type=server, csocket=CSocket, ssocket=SSocket, cipher_info=CipherInfo, down=Flow,sending=S}) ->
     inet:setopts(SSocket, [{active, once}]),
     {CipherInfo1, EncData} = shadowsocks_crypt:encode(CipherInfo, Data),
     S1 = try erlang:port_command(CSocket, EncData) of
@@ -155,7 +157,7 @@ handle_info({tcp, SSocket, Data},
     catch _E -> S
     end,
     %% gen_tcp:send(CSocket, EncData),
-    {noreply, State#state{cipher_info=CipherInfo1, flow=Flow+size(Data), sending=S1}};
+    {noreply, State#state{cipher_info=CipherInfo1, down=Flow+size(Data), sending=S1}};
 
 handle_info({inet_reply, _Socket, _Error}, State = #state{csocket=undefined,sending=1}) ->
     {stop, normal, State};
@@ -171,10 +173,14 @@ handle_info({tcp_closed, CSocket}, State = #state{csocket=CSocket}) ->
 handle_info({tcp_closed, SSocket}, State = #state{ssocket=SSocket}) ->
     {noreply, State#state{ssocket=undefined}};
 
-handle_info(report_flow, State = #state{flow=Flow}) when Flow > 0 ->
-    State#state.listener ! {report_flow, self(), State#state.flow},
+handle_info(report_flow, State = #state{port=Port,down=Down,up=Up}) when Down + Up >= ?REPORT_MIN ->
+    gen_event:notify(?FLOW_EVENT, {report, Port, Down, Up}),
     erlang:send_after(?REPORT_INTERVAL, self(), report_flow),
-    {noreply, State#state{flow=0}};
+    {noreply, State#state{down=0, up=0}};
+handle_info(report_flow, State) ->
+    erlang:send_after(?REPORT_INTERVAL, self(), report_flow),
+    {noreply, State};
+
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -191,7 +197,7 @@ handle_info(_Info, State) ->
 %% @end
 %%--------------------------------------------------------------------
 terminate(_Reason, State) ->
-    State#state.listener ! {report_flow, self(), State#state.flow},
+    gen_event:notify(?FLOW_EVENT, {report, State#state.port, State#state.down, State#state.up}),
     ok.
 
 %%--------------------------------------------------------------------

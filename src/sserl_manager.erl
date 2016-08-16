@@ -22,8 +22,6 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {
-          is_sync = false,
-          sync_url = undefined
          }).
 
 %%%===================================================================
@@ -60,7 +58,15 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
     load_local_ports(),
-    sserl_sync_flow:add_handler(),
+    case application:get_env(is_sync) of
+        {ok, true} ->
+            {ok, NodeId}  = application:get_env(node_id),
+            {ok, BaseUrl} = application:get_env(sync_url),
+            {ok, Key}     = application:get_env(sync_key),
+            ok = sserl_sync_flow:add_handler(NodeId, BaseUrl, Key);
+        _ ->
+            ok
+    end,
     {ok, #state{}}.
 
 %%--------------------------------------------------------------------

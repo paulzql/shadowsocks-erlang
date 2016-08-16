@@ -17,6 +17,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-include("sserl.hrl").
+
 -define(SERVER, ?MODULE).
 -define(MAX_LIMIT, 16#0FFFFFFFFFFFFFFF).
 
@@ -25,15 +27,11 @@
           port,         % 端口
           lsocket,      % 监听Socket
           conn_limit,   % 连接数限制
-          flow_limit,   % 单连接流量限制
-          max_flow,     % 最大流量
           expire_time,  % 失效时间
           password,     % 密码
           method,       % 加密类型
           accepting,     % 是否正在接收新连接
           conns = 0,    % 连接数
-          flow = 0,     % 流量
-          reported_flow = 0, % 已上报流量
           expire_timer = undefined % 过期时钟
 }).
 
@@ -52,8 +50,6 @@ start_link(Args) ->
     %% 获取配置信息
     Port       = proplists:get_value(port, Args),
     ConnLimit  = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
-    FlowLimit  = proplists:get_value(flow_limit,  Args, ?MAX_LIMIT),
-    MaxFlow    = proplists:get_value(max_flow, Args, ?MAX_LIMIT),
     ExpireTime = proplists:get_value(expire_time, Args, max_time()),
     Type       = proplists:get_value(type, Args, server),
     Password  = proplists:get_value(password, Args),
@@ -69,8 +65,6 @@ start_link(Args) ->
             {error, {badargs, port_out_of_range}};
         not is_integer(ConnLimit) ->
             {error, {badargs, conn_limit_need_integer}};
-        not is_integer(FlowLimit) ->
-            {error, {badargs, flow_limit_need_integer}};
         Type =/= server andalso Type =/= client ->
             {error, {badargs, error_type}};
         not ValidMethod ->
@@ -82,8 +76,6 @@ start_link(Args) ->
         true ->
             State = #state{type=Type, port=Port, lsocket=undefined, 
                            conn_limit=ConnLimit, 
-                           flow_limit=FlowLimit, 
-                           max_flow=MaxFlow,
                            expire_time=ExpireTime,
                            password=Password, method=Method, 
                            expire_timer=erlang:start_timer(max_time(ExpireTime), self(), expire, [{abs,true}])},
@@ -129,7 +121,7 @@ init([State,IP]) ->
             %% 设置异步接收
             case prim_inet:async_accept(LSocket, -1) of
                 {ok, _} ->
-                    sserl_stat:notify({listener, new, State#state.port}),
+                    gen_event:notify(?STAT_EVENT, {listener, new, State#state.port}),
                     {ok, State#state{lsocket=LSocket}};
                 {error, Error} ->
                     {stop, Error}
@@ -158,8 +150,6 @@ handle_call(get_port, _From, State=#state{port=Port}) ->
 
 handle_call({update, Args}, _From, State) ->
     ConnLimit  = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
-    FlowLimit  = proplists:get_value(flow_limit,  Args, ?MAX_LIMIT),
-    MaxFlow    = proplists:get_value(max_flow, Args, ?MAX_LIMIT),
     ExpireTime = proplists:get_value(expire_time, Args, ?MAX_LIMIT),
     Password  = proplists:get_value(password, Args),
     Method     = proplists:get_value(method, Args, table),    
@@ -167,8 +157,6 @@ handle_call({update, Args}, _From, State) ->
     erlang:cancel_timer(State#state.expire_timer, []),
     ExpireTimer = erlang:start_timer(max_time(ExpireTime), self(), expire, [{abs,true}]),
     {reply, ok, State#state{conn_limit = ConnLimit,
-                     flow_limit = FlowLimit,
-                     max_flow   = MaxFlow,
                      expire_time= ExpireTime,
                      password   = Password,
                      method     = Method,
@@ -206,12 +194,12 @@ handle_info({timeout, _Ref, expire}, State) ->
     {stop, expire, State};
 
 handle_info({inet_async, _LSocket, _Ref, {ok, CSocket}}, 
-            State=#state{type=Type, port=Port,method=Method, password=Password,flow_limit=FlowLimit,conns=Conns}) ->
+            State=#state{type=Type, port=Port,method=Method, password=Password,conns=Conns}) ->
     true = inet_db:register_socket(CSocket, inet_tcp), 
     {ok, {Addr, _}} = inet:peername(CSocket),
-    sserl_stat:notify({listener, accept, Port, Addr}),
+    gen_event:notify(?STAT_EVENT, {listener, accept, Port, Addr}),
 
-    {ok, Pid} = sserl_conn:start_link(CSocket, {Type, Method, Password, FlowLimit}),
+    {ok, Pid} = sserl_conn:start_link(CSocket, {Type, Method, Password, Port}),
     case gen_tcp:controlling_process(CSocket, Pid) of
         ok ->
             Pid ! {shoot, CSocket};
@@ -229,15 +217,8 @@ handle_info({inet_async, _LSocket, _Ref, {ok, CSocket}},
 handle_info({inet_async, _LSocket, _Ref, Error}, State) ->
     {stop, Error, State};
 
-%% 流量超了，结束进程
-handle_info({report_flow, _Pid, _ConnFlow}, State=#state{flow=Flow,max_flow=MaxFlow}) when Flow >= MaxFlow ->
-    {stop, exceed_flow, State};
-handle_info({report_flow, _Pid, ConnFlow}, State=#state{flow=Flow}) ->
-    {noreply, State#state{flow=Flow+ConnFlow}};
-
-handle_info({'EXIT', _Pid, _Reason}, State = #state{conns=Conns,port=Port,flow=Flow,reported_flow=RFlow}) ->
-    sserl_config:report_flow(Port, Flow-RFlow),
-    {noreply, State#state{conns=Conns-1, reported_flow=Flow}};
+handle_info({'EXIT', _Pid, _Reason}, State = #state{conns=Conns}) ->
+    {noreply, State#state{conns=Conns-1}};
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -253,8 +234,7 @@ handle_info(_Info, State) ->
 %% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, #state{port=Port,flow=Flow,reported_flow=RFlow}) ->
-    sserl_config:report_flow(Port, Flow-RFlow),
+terminate(_Reason, _State) ->
     ok.
 
 %%--------------------------------------------------------------------

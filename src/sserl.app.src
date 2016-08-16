@@ -5,10 +5,12 @@
   {mod, { sserl_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    jsx,
+    mnesia
    ]},
   {env,[]},
-  {modules, []},
+  {modules, [sserl_manager, sserl_listener, sserl_conn, sserl_listener_sup]},
 
   {maintainers, []},
   {licenses, []},

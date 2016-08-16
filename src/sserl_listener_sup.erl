@@ -28,6 +28,7 @@ start(Args) ->
         [Pid] ->
             sserl_listener:update(Pid, Args);
         _ ->
+            error_logger:info_msg("[~p] starting port ~p", [?MODULE, Args]),
             supervisor:start_child(?SERVER, [Args])
     end.
 
@@ -35,6 +36,7 @@ stop(Port) ->
     Children = supervisor:which_children(?SERVER),
     case [P || {_, P, _, _} <- Children, is_pid(P), sserl_listener:get_port(P) =:= Port] of
         [Pid] ->
+            error_logger:info_msg("[~p] stopping port ~p", [?MODULE, Port]),            
             sserl_listener:stop(Pid),
             ok;
         _ ->
