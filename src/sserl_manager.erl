@@ -58,15 +58,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
     load_local_ports(),
-    case application:get_env(is_sync) of
-        {ok, true} ->
-            {ok, NodeId}  = application:get_env(node_id),
-            {ok, BaseUrl} = application:get_env(sync_url),
-            {ok, Key}     = application:get_env(sync_key),
-            ok = sserl_sync_flow:add_handler(NodeId, BaseUrl, Key);
-        _ ->
-            ok
-    end,
+    sserl_sync_flow:add_handler(),
     {ok, #state{}}.
 
 %%--------------------------------------------------------------------
