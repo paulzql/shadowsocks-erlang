@@ -58,7 +58,12 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
     load_local_ports(),
-    sserl_sync_flow:add_handler(),
+    case sserl_sync_flow:add_handler() of
+        {'EXIT', Reason} ->
+            throw(Reason);
+        _ -> ok
+    end,
+    sserl_stat:add_handler(),
     {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -134,6 +139,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 load_local_ports() ->
-    PortConfigs = application:get_env(ports, sserl, []),
+    PortConfigs = application:get_env(sserl, ports, []),
     [sserl_listener_sup:start(C) || C <- PortConfigs],
     ok.

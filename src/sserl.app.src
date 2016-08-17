@@ -14,5 +14,8 @@
 
   {maintainers, []},
   {licenses, []},
-  {links, []}
+  {links, []},
+  {beegzi_status, [
+                  {running_ports, "running ss ports", {sserl_manager, status, []}}
+                  ]}
  ]}.

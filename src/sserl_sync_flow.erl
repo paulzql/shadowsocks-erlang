@@ -30,7 +30,9 @@
 -define(HTTPC_OPTIONS, [{body_format, binary}]).
 -define(TIMEOUT, 10000).
 
--define(SYNC_INTERVAL, 5*60*1000).
+-define(SYNC_INTERVAL, 2 * 60*1000).
+-define(REPORT_INTERVAL, 5*60*1000).
+-define(REPORT_MIN, 10240).
 
 -record(state, {
           node_id,
@@ -86,17 +88,17 @@ init([init_mysql]) ->
     {ok, User} = application:get_env(sync_mysql_user),
     {ok, Pass} = application:get_env(sync_mysql_pass),
     {ok, DB}   = application:get_env(sync_mysql_db),
-    Port = application:get_env(sync_mysql_port, sserl, 3306),
+    Port = application:get_env(sserl, sync_mysql_port, 3306),
 
     %% the clumn order must match the flow record element order
-    SQLUsers   = application:get_env(sync_sql_users, sserl, "SELECT port,id,traffic_enable,d,u,method,passwd FROM user WHERE enable=1"),
-    SQLReport  = application:get_env(sync_sql_reqport, sserl, "UPDATE user SET d=d+?,u=u+? WHERE id=?"),
-    SQLLog     = application:get_env(sync_sql_log, sserl, "INSERT INTO user_traffic_log values(null,?,?,?,?,?,?,?)"), 
-    SQLRate    = application:get_env(sync_sql_rate, sserl, "SELECT traffic_rate FROM ss_node WHERE id=?"),
+    SQLUsers   = application:get_env(sserl, sync_sql_users, "SELECT port,id,transfer_enable,d,u,method,passwd FROM user WHERE enable=1"),
+    SQLReport  = application:get_env(sserl, sync_sql_reqport, "UPDATE user SET d=d+?,u=u+? WHERE id=?"),
+    SQLLog     = application:get_env(sserl, sync_sql_log, "INSERT INTO user_traffic_log values(null,?,?,?,?,?,?,?)"), 
+    SQLRate    = application:get_env(sserl, sync_sql_rate, "SELECT traffic_rate FROM ss_node WHERE id=?"),
 
     Prepares = [{users, SQLUsers}, {report, SQLReport}, {log, SQLLog}, {rate, SQLRate}],
     MysqlArgs = [{host, Host},{port,Port},{user, User},{password, Pass},{database, DB}, {prepare, Prepares}],
-    mysql_poolboy:add_pool(?MYSQL_ID, [{size, 10}, {max_overflow, 20}], MysqlArgs),
+    mysql_poolboy:add_pool(?MYSQL_ID, [{size, 2}, {max_overflow, 10}], MysqlArgs),
     init([init_mnesia]);
 
 init([init_mnesia]) ->
@@ -106,7 +108,8 @@ init([init_mnesia]) ->
             ets:new(?LOG_TAB, [public, named_table]),
             {ok, _} = mnesia:subscribe({table, ?FLOW_TAB, detailed}),
             error_logger:info_msg("[sserl_sync_flow] init ok ~p", [self()]),
-            erlang:send_after(0, self(), sync_timer),            
+            erlang:send_after(0, self(), sync_timer),
+            erlang:send_after(?REPORT_INTERVAL, report_timer),
             {ok, #state{node_id=NodeId, rate=get_rate(NodeId, 1)}};
         Error ->
             error_logger:info_msg("[sserl_sync_flow] init failed: ~p", [Error]),
@@ -196,11 +199,15 @@ handle_info({mnesia_table_event, {delete, {?FLOW_TAB, Port}, _}}, State) ->
     sserl_listener_sup:stop(Port),
     {ok, State};
 
-handle_info(sync_timer, State = #state{node_id=NodeId, rate=Rate}) ->
+handle_info(sync_timer, State) ->
     spawn(fun sync_users/0),
-    do_report(NodeId, Rate),
     erlang:send_after(?SYNC_INTERVAL, self(), sync_timer),
     self() ! sync_rate,
+    {ok, State};
+
+handle_info(report_timer, State = #state{node_id=NodeId, rate=Rate}) ->
+    do_report(NodeId, Rate, ?REPORT_MIN),
+    erlang:send_after(?REPORT_INTERVAL, self(), report_timer),
     {ok, State};
 
 handle_info(sync_rate, State = #state{node_id=NodeId, rate=Rate}) ->
@@ -220,7 +227,8 @@ handle_info(Info, State) ->
 %% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _State) ->
+terminate(_Reason, #state{node_id=NodeId, rate=Rate}) ->
+    do_report(NodeId, Rate, 0),
     ets:delete(?LOG_TAB),
     uninit_mnesia(),
     ok.
@@ -327,10 +335,10 @@ uninit_mnesia() ->
 
 
 default_method() ->
-    application:get_env(default_method, sserl, rc4_md5).
+    application:get_env(sserl, default_method, rc4_md5).
 
 default_ip() ->
-    application:get_env(default_ip, sserl, undefined).
+    application:get_env(sserl, default_ip, undefined).
 
 insert_flow(Flow) ->
     case mnesia:wread({?FLOW_TAB, Flow#flow.port}) of
@@ -354,10 +362,10 @@ flow_to_args(#flow{port=Port, method=Method, password=Password}) ->
     [{port, Port}, {ip, default_ip()}, {method, Method1}, {password, Password}].
 
 sync_users() ->
-    case mysql_poolboy:query(?MYSQL_ID, users) of
-        {ok, Users} ->
+    case mysql_poolboy:execute(?MYSQL_ID, users, []) of
+        {ok, _, Users} ->
             F = fun() ->
-                  [insert_flow(list_to_tuple([flow|User])) || User <- Users]
+                  [insert_flow(list_to_tuple([flow|trip_binary(User)])) || User <- Users]
                 end,
             mnesia:transaction(F), 
             ok;
@@ -365,13 +373,13 @@ sync_users() ->
             ok
     end.
 
-do_report(NodeId, Rate) ->
-    Flows = ets:select(?LOG_TAB, [{{'_','_','$1','_'}, [{'>','$1',0}], ['$_']},
-                                  {{'_','_','_','$1'}, [{'>','$1',0}], ['$_']}]),
+do_report(NodeId, Rate, Min) ->
+    Flows = ets:select(?LOG_TAB, [{{'_','_','$1','_'}, [{'>','$1',Min}], ['$_']},
+                                  {{'_','_','_','$1'}, [{'>','$1',Min}], ['$_']}]),
     F = fun(Pid) ->
                 lists:map(fun({_Port, Uid, D, U}) ->
-                                  ok = mysql:query(Pid, report, [D, U, Uid]),
-                                  mysql:query(Pid, log, [Uid, U, D, NodeId, Rate, traffic_string((U+D)*Rate), os:system_time(seconds)])
+                                  ok = mysql:execute(Pid, report, [D, U, Uid]),
+                                  mysql:execute(Pid, log, [Uid, U, D, NodeId, Rate, traffic_string((U+D)*Rate), os:system_time(seconds)])
                           end, Flows),
                 ok
         end,
@@ -384,7 +392,7 @@ do_report(NodeId, Rate) ->
     end.
 
 get_rate(NodeId, OldRate) ->
-    case mysql_poolboy:query(?MYSQL_ID, rate, NodeId) of
+    case mysql_poolboy:execute(?MYSQL_ID, rate, [NodeId]) of
         {ok, _, [[Rate]]} ->                               
             Rate;
         _ ->
@@ -392,10 +400,16 @@ get_rate(NodeId, OldRate) ->
     end.
 
 traffic_string(T) when T > 1047527424 ->
-    io_lib:format("~pGB", [T/1073741824]);
+    io_lib:format("~pGB", [round(T/1073741824*100)/100]);
 traffic_string(T) when T > 1022976 ->
-    io_lib:format("~pMB", [T/1048576]);
+    io_lib:format("~pMB", [round(T/1048576*100)/100]);
 traffic_string(T) ->
-    io_lib:format("~pKB", [T/1024]).
+    io_lib:format("~pKB", [round(T/1024*100)/100]).
 
+trip_binary(L) ->
+    lists:map(fun(I) when is_binary(I) ->
+                      binary_to_list(I);
+                 (I) ->
+                      I
+              end, L).
 

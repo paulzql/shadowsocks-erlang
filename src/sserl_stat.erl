@@ -11,12 +11,13 @@
 -behaviour(gen_event).
 
 %% API
--export([notify/1, start_link/0, add_handler/0]).
+-export([add_handler/0]).
 
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2, 
          handle_info/2, terminate/2, code_change/3]).
 
+-include("sserl.hrl").
 -define(SERVER, ?MODULE).
 
 -record(state, {}).
@@ -24,24 +25,6 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-notify(Arg) ->
-    gen_event:notify(?SERVER, Arg).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Creates an event manager
-%%
-%% @spec start_link() -> {ok, Pid} | {error, Error}
-%% @end
-%%--------------------------------------------------------------------
-start_link() ->
-    case gen_event:start_link({local, ?SERVER}) of
-        {ok, Pid} ->
-            add_handler(),
-            {ok, Pid};
-        Error ->
-            Error
-    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -51,7 +34,7 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 add_handler() ->
-    gen_event:add_handler(?SERVER, ?MODULE, []).
+    gen_event:add_handler(?STAT_EVENT, ?MODULE, []).
 
 %%%===================================================================
 %%% gen_event callbacks

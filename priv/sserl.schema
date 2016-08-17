@@ -1,0 +1,70 @@
+%% -*- mode: erlang -*-
+
+%% =================================================
+%% local setting
+%% =================================================
+%% @doc ss listen ip and port.
+%%      eg: 0.0.0.0:8388
+{mapping, "ss.ports.$name.ip", "sserl.ports", [
+          {datatype, ip}
+]}.
+
+%% @doc encrypt method.
+%%      eg: aes-256-cfb
+{mapping, "ss.ports.$name.method", "sserl.ports", [
+          {datatype, string},
+          {default,  "rc4-md5"}
+]}.
+
+%% @doc password.
+{mapping, "ss.ports.$name.password", "sserl.ports", [
+          {datatype, string}
+]}.
+
+{translation,"sserl.ports",
+fun(Conf) ->
+  ConfList = cuttlefish_variable:filter_by_prefix("ss.ports", Conf),
+  Map = lists:foldl(fun({[_,_,Name,"ip"], {Addr, Port}}, Acc) ->
+                            IP = list_to_tuple([list_to_integer(I) || I <- string:tokens(Addr,".")]),
+                            maps:put(Name, [{ip, IP},{port, Port}|maps:get(Name, Acc, [])], Acc);
+                       ({[_,_,Name, Attr], Value}, Acc) ->
+                            maps:put(Name, [{list_to_atom(Attr), Value}|maps:get(Name, Acc, [])], Acc);
+                       (_, Acc) ->
+                            Acc
+                    end, #{}, ConfList),
+  maps:values(Map)
+end}.
+
+%% =================================================
+%% sync setting
+%% =================================================
+%% @doc is sync enabled
+{mapping, "ss.sync", "sserl.sync_enabled", [
+  {datatype, {enum, [ture, false]}},
+  {default, false}
+]}.
+
+%% @doc node id (same with web)
+{mapping, "ss.node_id", "sserl.sync_node_id", [
+  {datatype, integer}
+]}.
+
+%% @doc mysql host
+{mapping, "ss.mysql.host", "sserl.sync_mysql_host", [
+  {datatype, string}
+]}.
+%% @doc mysql port
+{mapping, "ss.mysql.port", "sserl.sync_mysql_port", [
+  {datatype, integer},
+  {default, 3306}
+]}.
+
+%% @doc mysql database
+{mapping, "ss.mysql.db", "sserl.sync_mysql_db", [
+  {datatype, string}
+]}.
+
+%% @doc mysql password
+{mapping, "ss.mysql.pass", "sserl.sync_mysql_pass", [
+  {datatype, string}
+]}.

@@ -53,7 +53,7 @@ start_link(Args) ->
     ExpireTime = proplists:get_value(expire_time, Args, max_time()),
     Type       = proplists:get_value(type, Args, server),
     Password  = proplists:get_value(password, Args),
-    Method    = parse_method(proplists:get_value(method, Args, table)),
+    Method    = parse_method(proplists:get_value(method, Args, rc4_md5)),
     IP        = proplists:get_value(ip, Args, undefined),
     CurrTime  = os:system_time(milli_seconds),
     %% 校验参数
@@ -149,10 +149,10 @@ handle_call(get_port, _From, State=#state{port=Port}) ->
     {reply, Port, State};
 
 handle_call({update, Args}, _From, State) ->
-    ConnLimit  = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
-    ExpireTime = proplists:get_value(expire_time, Args, ?MAX_LIMIT),
-    Password  = proplists:get_value(password, Args),
-    Method     = proplists:get_value(method, Args, table),    
+    ConnLimit  = proplists:get_value(conn_limit,  Args, State#state.conn_limit),
+    ExpireTime = proplists:get_value(expire_time, Args, State#state.expire_time),
+    Password  = proplists:get_value(password, Args, State#state.password),
+    Method     = proplists:get_value(method, Args, State#state.method),    
 
     erlang:cancel_timer(State#state.expire_timer, []),
     ExpireTimer = erlang:start_timer(max_time(ExpireTime), self(), expire, [{abs,true}]),
