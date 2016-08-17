@@ -92,8 +92,8 @@ init([init_mysql]) ->
 
     %% the clumn order must match the flow record element order
     SQLUsers   = application:get_env(sserl, sync_sql_users, "SELECT port,id,transfer_enable,d,u,method,passwd FROM user WHERE enable=1"),
-    SQLReport  = application:get_env(sserl, sync_sql_reqport, "UPDATE user SET d=d+?,u=u+? WHERE id=?"),
-    SQLLog     = application:get_env(sserl, sync_sql_log, "INSERT INTO user_traffic_log values(null,?,?,?,?,?,?,?)"), 
+    SQLReport  = application:get_env(sserl, sync_sql_reqport, "UPDATE user SET d=d+?,u=u+?,t=unix_timestamp() WHERE id=?"),
+    SQLLog     = application:get_env(sserl, sync_sql_log, "INSERT INTO user_traffic_log values(null,?,?,?,?,?,?,unix_timestamp())"), 
     SQLRate    = application:get_env(sserl, sync_sql_rate, "SELECT traffic_rate FROM ss_node WHERE id=?"),
 
     Prepares = [{users, SQLUsers}, {report, SQLReport}, {log, SQLLog}, {rate, SQLRate}],
@@ -180,11 +180,11 @@ handle_info({mnesia_table_event,{write, ?FLOW_TAB,
             State) when D + U > Max ->
     sserl_listener_sup:stop(P),
     {ok, State};
-handle_info({mnesia_table_event, {write, ?FLOW_TAB, 
-                                  #flow{max_flow=F,method=M,password=P}, 
-                                  [#flow{max_flow=F,method=M,password=P}],_}}, State) ->
-    %% nothing to change
-    {ok, State};
+%% handle_info({mnesia_table_event, {write, ?FLOW_TAB, 
+%%                                   #flow{max_flow=F,method=M,password=P}, 
+%%                                   [#flow{max_flow=F,method=M,password=P}],_}}, State) ->
+%%     %% nothing to change
+%%     {ok, State};
 handle_info({mnesia_table_event, {write, ?FLOW_TAB, NewFlow, _, _}}, State) ->
     %% init log element
     case ets:lookup(?LOG_TAB, NewFlow#flow.port) of
@@ -379,7 +379,7 @@ do_report(NodeId, Rate, Min) ->
     F = fun(Pid) ->
                 lists:map(fun({_Port, Uid, D, U}) ->
                                   ok = mysql:execute(Pid, report, [D, U, Uid]),
-                                  mysql:execute(Pid, log, [Uid, U, D, NodeId, Rate, traffic_string((U+D)*Rate), os:system_time(seconds)])
+                                  mysql:execute(Pid, log, [Uid, U, D, NodeId, Rate, traffic_string((U+D)*Rate)])
                           end, Flows),
                 ok
         end,
