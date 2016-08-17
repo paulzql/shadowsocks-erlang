@@ -40,7 +40,7 @@ end}.
 %% =================================================
 %% @doc is sync enabled
 {mapping, "ss.sync", "sserl.sync_enabled", [
-  {datatype, {enum, [ture, false]}},
+  {datatype, {enum, [true, false]}},
   {default, false}
 ]}.
 
@@ -61,6 +61,11 @@ end}.
 
 %% @doc mysql database
 {mapping, "ss.mysql.db", "sserl.sync_mysql_db", [
+  {datatype, string}
+]}.
+
+%% @doc mysql user
+{mapping, "ss.mysql.user", "sserl.sync_mysql_user", [
   {datatype, string}
 ]}.
 

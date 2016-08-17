@@ -109,7 +109,7 @@ init([init_mnesia]) ->
             {ok, _} = mnesia:subscribe({table, ?FLOW_TAB, detailed}),
             error_logger:info_msg("[sserl_sync_flow] init ok ~p", [self()]),
             erlang:send_after(0, self(), sync_timer),
-            erlang:send_after(?REPORT_INTERVAL, report_timer),
+            erlang:send_after(?REPORT_INTERVAL, self(), report_timer),
             {ok, #state{node_id=NodeId, rate=get_rate(NodeId, 1)}};
         Error ->
             error_logger:info_msg("[sserl_sync_flow] init failed: ~p", [Error]),
