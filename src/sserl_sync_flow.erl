@@ -32,11 +32,12 @@
 
 -define(SYNC_INTERVAL, 2 * 60*1000).
 -define(REPORT_INTERVAL, 5*60*1000).
--define(REPORT_MIN, 10240).
+-define(REPORT_MIN, 1048576).% 1MB
 
 -record(state, {
           node_id,
-          rate
+          rate,
+          report_min
          }).
 
 -record(flow, {
@@ -103,6 +104,7 @@ init([init_mysql]) ->
 
 init([init_mnesia]) ->
     {ok, NodeId}=application:get_env(sync_node_id),
+    ReportMin = application:get_env(sserl, sync_report_min, ?REPORT_MIN),
     case init_mnesia() of
         ok ->
             ets:new(?LOG_TAB, [public, named_table]),
@@ -110,7 +112,7 @@ init([init_mnesia]) ->
             error_logger:info_msg("[sserl_sync_flow] init ok ~p", [self()]),
             erlang:send_after(0, self(), sync_timer),
             erlang:send_after(?REPORT_INTERVAL, self(), report_timer),
-            {ok, #state{node_id=NodeId, rate=get_rate(NodeId, 1)}};
+            {ok, #state{node_id=NodeId, rate=get_rate(NodeId, 1), report_min=ReportMin}};
         Error ->
             error_logger:info_msg("[sserl_sync_flow] init failed: ~p", [Error]),
             {error, Error}
@@ -205,8 +207,8 @@ handle_info(sync_timer, State) ->
     self() ! sync_rate,
     {ok, State};
 
-handle_info(report_timer, State = #state{node_id=NodeId, rate=Rate}) ->
-    do_report(NodeId, Rate, ?REPORT_MIN),
+handle_info(report_timer, State = #state{node_id=NodeId, rate=Rate, report_min=Min}) ->
+    do_report(NodeId, Rate, Min),
     erlang:send_after(?REPORT_INTERVAL, self(), report_timer),
     {ok, State};
 
@@ -268,71 +270,6 @@ init_mnesia() ->
 uninit_mnesia() ->
     mnesia:del_table_copy(?FLOW_TAB, node()),
     ok.
-
-%% get users info from remote api
-%% restful_get_users(BaseUrl, Key) ->
-%%     case httpc:request(get, {BaseUrl++"/mu/users", [{"key", Key}]}, [], ?HTTPC_OPTIONS) of
-%%         {ok, {{_, 200, _}, _, Body}} ->
-%%             Json = jsx:decode(Body),
-%%             case {proplists:get_value(<<"ret">>, Json, 0), proplists:get_value(<<"data">>, Json, [])} of
-%%                 {1, Data} when is_list(Data) ->
-%%                     {ok, lists:map(fun(D) ->
-%%                                            #flow {
-%%                                               port = proplists:get_value(<<"port">>, D, -1),
-%%                                               uid  = proplists:get_value(<<"id">>, D, 0),
-%%                                               max_flow = proplists:get_value(<<"transfer_enable">>, D, 0),
-%%                                               download = proplists:get_value(<<"d">>, D, 0),
-%%                                               upload   = proplists:get_value(<<"u">>, D, 0),
-%%                                               method  = binary_to_list(proplists:get_value(<<"method">>, D, <<"">>)),
-%%                                               password = binary_to_list(proplists:get_value(<<"passwd">>, D, <<"">>))
-%%                                               }
-%%                               end, Data)};
-%%                 _ ->
-%%                     {error, decode_json_failed}
-%%             end;
-%%         _ ->
-%%             error_logger:error_msg("http request failed: ~p", [BaseUrl++"/mu/users"]),
-%%             false
-%%     end.
-
-%% report flow
-%% restful_report_flow(BaseUrl, Key, {NodeId, Uid, Download, Upload}) ->
-%%     Url = lists:concat([BaseUrl, "/mu/users/", integer_to_list(Uid), "/traffic"]), 
-%%     Str = io_lib:format("node_id=~ts&u=~ts&d=~ts", [NodeId, Upload, Download]),
-%%     Form = list_to_binary(Str),
-%%     case httpc:request(post, {Url, [{"key", Key}], ?FORM_TYPE, Form}, [], ?HTTPC_OPTIONS) of
-%%         {ok, {{_, 200, _}, _, Body}} ->
-%%             Ret = jsx:decode(Body),
-%%             case proplists:get_value(<<"ret">>, Ret, -1) of
-%%                 1 ->
-%%                     ok;
-%%                 _ ->
-%%                     {error, proplists:get_value(<<"msg">>, Ret, "")}
-%%             end;
-%%         _ ->
-%%             error_logger:error_msg("http request failed: ~p", [Url]),
-%%             {error, request_failed}
-%%     end.  
-
-
-%% %% report flow
-%% restful_report_flow(BaseUrl, Key, NodeId, Flows) ->
-%%     Url = lists:concat([BaseUrl, "/mu/nodes/", integer_to_list(NodeId), "/traffic"]), 
-%%     Form = jsx:encode([[{<<"port">>, Port},{<<"d">>, D}, {<<"u">>, U}] || {Port,D,U} <- Flows]),
-%%     case httpc:request(post, {Url, [{"key", Key}], ?JSON_TYPE, Form}, [], ?HTTPC_OPTIONS) of
-%%         {ok, {{_, 200, _}, _, Body}} ->
-%%             Ret = jsx:decode(Body),
-%%             case proplists:get_value(<<"ret">>, Ret, -1) of
-%%                 1 ->
-%%                     ok;
-%%                 _ ->
-%%                     {error, proplists:get_value(<<"msg">>, Ret, "")}
-%%             end;
-%%         _ ->
-%%             error_logger:error_msg("http request failed: ~p", [Url]),
-%%             {error, request_failed}
-%%     end.  
-
 
 default_method() ->
     application:get_env(sserl, default_method, rc4_md5).
