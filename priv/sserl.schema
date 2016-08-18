@@ -73,3 +73,10 @@ end}.
 {mapping, "ss.mysql.pass", "sserl.sync_mysql_pass", [
   {datatype, string}
 ]}.
+
+%% @doc min size flow to report
+%%      default: 1MB
+{mapping, "ss.report_min", "sserl.sync_report_min", [
+  {datatype, integer},
+  {default,  1048576}
+]}.
