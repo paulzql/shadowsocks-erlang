@@ -385,7 +385,7 @@ do_report(NodeId, Rate, Min) ->
         end,
     case mysql_poolboy:transaction(?MYSQL_ID, F) of
         {atomic, _} ->
-            [ets:update_element(?LOG_TAB, P, [{3, 0},{4,0}]) || {P, _,_} <- Flows],
+            [ets:update_element(?LOG_TAB, P, [{3, 0},{4,0}]) || {P, _,_,_} <- Flows],
             ok;
         Error ->
             Error

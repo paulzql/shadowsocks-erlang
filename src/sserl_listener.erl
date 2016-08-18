@@ -152,7 +152,7 @@ handle_call({update, Args}, _From, State) ->
     ConnLimit  = proplists:get_value(conn_limit,  Args, State#state.conn_limit),
     ExpireTime = proplists:get_value(expire_time, Args, State#state.expire_time),
     Password  = proplists:get_value(password, Args, State#state.password),
-    Method     = proplists:get_value(method, Args, parse_method(State#state.method)),    
+    Method     = parse_method(proplists:get_value(method, Args, State#state.method)),    
 
     erlang:cancel_timer(State#state.expire_timer, []),
     ExpireTimer = erlang:start_timer(max_time(ExpireTime), self(), expire, [{abs,true}]),
@@ -256,7 +256,8 @@ max_time() ->
 max_time(Time) ->
     erlang:min(Time, max_time()).
 
-parse_method(Method) when is_binary(Method);is_list(Method) ->
+
+parse_method(Method) when is_list(Method); is_binary(Method) ->
     list_to_atom(re:replace(Method, "-", "_", [global, {return, list}]));
 parse_method(Method) when is_atom(Method) ->
     Method.
