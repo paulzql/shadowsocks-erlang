@@ -132,7 +132,6 @@ init([init_mnesia]) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_event({report, Port, Download, Upload}, State = #state{rate=Rate}) ->
-    io:format("report: ~p~n", [{Port, Download, Upload}]),
     F = fun() ->
                 case mnesia:wread({?FLOW_TAB, Port}) of
                     [Flow=#flow{download=D, upload=U}] ->
@@ -320,7 +319,7 @@ do_report(NodeId, Rate, Min) ->
                           end, Flows),
                 ok
         end,
-    case mysql_poolboy:transaction(?MYSQL_ID, F) of
+    case catch mysql_poolboy:transaction(?MYSQL_ID, F) of
         {atomic, _} ->
             [ets:update_element(?LOG_TAB, P, [{3, 0},{4,0}]) || {P, _,_,_} <- Flows],
             ok;
@@ -329,7 +328,7 @@ do_report(NodeId, Rate, Min) ->
     end.
 
 get_rate(NodeId, OldRate) ->
-    case mysql_poolboy:execute(?MYSQL_ID, rate, [NodeId]) of
+    case catch mysql_poolboy:execute(?MYSQL_ID, rate, [NodeId]) of
         {ok, _, [[Rate]]} ->                               
             Rate;
         _ ->

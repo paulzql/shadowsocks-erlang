@@ -1,42 +1,24 @@
 -module(shadowsocks_crypt).
 
 %% API
--export([methods/0, init_cipher_info/2, encode/2, decode/2, key_iv_len/1, stream_init/3]).
+-export([methods/0, init_cipher_info/2, encode/2, decode/2, key_iv_len/1, stream_init/3, hmac/2]).
 
 -include("shadowsocks.hrl").
 
 methods() ->
-    [rc4_md5, table, aes_128_cfb, aes_192_cfb, aes_256_cfb, none].
+    [rc4_md5, aes_128_cfb, aes_192_cfb, aes_256_cfb, none].
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Return the cipher information
 %% 
-%% @spec cipher_info(Method, Password::string()) -> 
-%%                       {default, EncTable::list(), DecTable::list()} |
-%%                       {Method, Key::binary(), IvEnc::binary(), IvDec::binanry()}
-%%      Method := table | rc4 | des_cfb | chacha20_poly1305 | aes_cfb128
+%% @spec cipher_info(Method, Password::string()) -> #cipher_info{}.
+%% 
+%%      Method := rc4_md5 | des_cfb |  | aes_cfb128
 %% @end
 %%--------------------------------------------------------------------
-init_cipher_info(table, Password) ->
-    <<Value:64/little-unsigned-integer, _:64/little-unsigned-integer>> 
-        = crypto:hash(md5,Password),
-    Init = lists:seq(0, 255),
-    EncTable = lists:foldl(
-                 fun(I, Acc) ->
-                         lists:sort(
-                           fun(X, Y) ->
-                                   Value rem (X + I) =< Value rem (Y + I)
-                           end, Acc) 
-                 end, Init, lists:seq(1,1023)),
-    ZipTable = lists:zip(Init, EncTable),
-    ZipDecTable = lists:keysort(1, [{N, M} || {M, N} <- ZipTable]),
-    DecTable = [M || {_, M} <- ZipDecTable],
-    #cipher_info{method=table, 
-                 table={list_to_tuple(EncTable), list_to_tuple(DecTable)}};
-
- init_cipher_info(none, _) ->
-    ok;
+init_cipher_info(none, _) ->
+    #cipher_info{method=none};
 
 init_cipher_info(Method, Password) ->
     {KeyLen, IvLen} = key_iv_len(Method),
@@ -57,9 +39,6 @@ init_cipher_info(Method, Password) ->
 encode(#cipher_info{method=none}, Data) ->
     Data;
 
-encode(#cipher_info{method=table, table={EncTable, _}}=CipherInfo, Data) ->
-    {CipherInfo, transform(EncTable, Data)};
-
 encode(#cipher_info{iv_sent = false, encode_iv=Iv}=CipherInfo, Data) ->
     NewCipherInfo = CipherInfo#cipher_info{iv_sent=true},
     {NewCipherInfo1, EncData} = encode(NewCipherInfo, Data), 
@@ -68,7 +47,7 @@ encode(#cipher_info{iv_sent = false, encode_iv=Iv}=CipherInfo, Data) ->
 encode(#cipher_info{method=rc4_md5, stream_enc_state=S}=CipherInfo, Data) ->
     {S1, EncData} = crypto:stream_encrypt(S, Data),
     {CipherInfo#cipher_info{stream_enc_state=S1}, EncData};
-
+%% aes_128_cfb | aes_192_cfb | aes_256_cfb 
 encode(#cipher_info{method=_Method, key=Key, encode_iv=Iv, enc_rest=Rest}=CipherInfo, Data) ->
     DataSize = size(Data),
     RestSize = size(Rest),
@@ -95,13 +74,11 @@ encode(#cipher_info{method=_Method, key=Key, encode_iv=Iv, enc_rest=Rest}=Cipher
 decode(#cipher_info{method=none}, Data) ->
     Data;
 
-decode(#cipher_info{method=table, table={_, DecTable}}=CipherInfo, EncData) ->
-    {CipherInfo, transform(DecTable, EncData)};
-
 decode(#cipher_info{method=rc4_md5, stream_dec_state=S}=CipherInfo, EncData) ->
     {S1, Data} = crypto:stream_decrypt(S, EncData),
     {CipherInfo#cipher_info{stream_dec_state=S1}, Data};
 
+%% aes_128_cfb | aes_192_cfb | aes_256_cfb 
 decode(#cipher_info{method=_Method, key=Key, decode_iv=Iv, dec_rest=Rest}=CipherInfo, EncData) ->
     DataSize = size(EncData),
     RestSize = size(Rest),
@@ -115,19 +92,8 @@ decode(#cipher_info{method=_Method, key=Key, decode_iv=Iv, dec_rest=Rest}=Cipher
 
     {CipherInfo#cipher_info{decode_iv=NewIv, dec_rest=Rest2}, Result}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Decode or encode the data with default table ciphe method
-%%
-%% @spec transform(Table, Data) -> Data
-%%      Table := [tuple()]
-%%      Data := iolist() | binary()
-%% @end
-%%--------------------------------------------------------------------
-transform(Table, Data) when is_binary(Data)->
-    << <<(element(X+1, Table))>> || <<X>> <= Data >>;
-transform(Table, Data) when is_list(Data) ->
-    [ element(X+1, Table) || X <- Data ].
+hmac(Key, Data) ->
+    crypto:hmac(sha, Key, Data, ?HMAC_LEN).
 
 %%--------------------------------------------------------------------
 %% @doc 

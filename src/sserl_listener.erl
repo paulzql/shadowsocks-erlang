@@ -23,7 +23,7 @@
 -define(MAX_LIMIT, 16#0FFFFFFFFFFFFFFF).
 
 -record(state, {
-          type,         % 类型
+          ota,          % 一次验证
           port,         % 端口
           lsocket,      % 监听Socket
           conn_limit,   % 连接数限制
@@ -51,7 +51,7 @@ start_link(Args) ->
     Port       = proplists:get_value(port, Args),
     ConnLimit  = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
     ExpireTime = proplists:get_value(expire_time, Args, max_time()),
-    Type       = proplists:get_value(type, Args, server),
+    OTA       = proplists:get_value(ota, Args, false),
     Password  = proplists:get_value(password, Args),
     Method    = parse_method(proplists:get_value(method, Args, rc4_md5)),
     IP        = proplists:get_value(ip, Args, undefined),
@@ -65,8 +65,6 @@ start_link(Args) ->
             {error, {badargs, port_out_of_range}};
         not is_integer(ConnLimit) ->
             {error, {badargs, conn_limit_need_integer}};
-        Type =/= server andalso Type =/= client ->
-            {error, {badargs, error_type}};
         not ValidMethod ->
             {error, {badargs, unsupported_method}};
         not is_list(Password) ->
@@ -74,7 +72,7 @@ start_link(Args) ->
         CurrTime >= ExpireTime ->
             {error, expired};
         true ->
-            State = #state{type=Type, port=Port, lsocket=undefined, 
+            State = #state{ota=OTA, port=Port, lsocket=undefined, 
                            conn_limit=ConnLimit, 
                            expire_time=ExpireTime,
                            password=Password, method=Method, 
@@ -194,12 +192,12 @@ handle_info({timeout, _Ref, expire}, State) ->
     {stop, expire, State};
 
 handle_info({inet_async, _LSocket, _Ref, {ok, CSocket}}, 
-            State=#state{type=Type, port=Port,method=Method, password=Password,conns=Conns}) ->
+            State=#state{ota=OTA, port=Port,method=Method, password=Password,conns=Conns}) ->
     true = inet_db:register_socket(CSocket, inet_tcp), 
     {ok, {Addr, _}} = inet:peername(CSocket),
     gen_event:notify(?STAT_EVENT, {listener, accept, Port, Addr}),
 
-    {ok, Pid} = sserl_conn:start_link(CSocket, {Type, Method, Password, Port}),
+    {ok, Pid} = sserl_conn:start_link(CSocket, {OTA, Method, Password, Port}),
     case gen_tcp:controlling_process(CSocket, Pid) of
         ok ->
             Pid ! {shoot, CSocket};

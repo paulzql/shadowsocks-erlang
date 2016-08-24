@@ -1,8 +1,3 @@
-%% Logging macro
--define(INFO(Format, Data), error_logger:info_msg(Format, Data)).
--define(WARNING(Format, Data), error_logger:warning_msg(Format, Data)).
--define(ERROR(Format, Data), error_logger:error_msg(Format, Data)).
-
 %% Definition of macros and constants for socksv5
 -define(SOCKS5_VER, 16#05).
 
@@ -31,10 +26,18 @@
 
 -define(SOCKS5_RESERVED_FIELD, 16#00).
 
+-define(IS_OTA(Atyp), (Atyp band 16#10) =:= 16#10).
+-define(OTA_ATYP_V4, 16#11).
+-define(OTA_ATYP_V6, 16#14).
+-define(OTA_ATYP_DOM,16#13).
+-define(GET_ATYP(Atyp), Atyp band 16#0F).
+
+-define(HMAC_LEN, 10).
+-define(OTA_HEAD_LEN, 12).
+
 %% cipher info
 -record(cipher_info, {
-          method=default,      %% table | rc4 | aes_128_cfb | des_cfb | aes_192_cfb | aes_256_cfb
-          table = {[], []},    %% table for table method only
+          method=rc4_md5,      %% rc4_md5 | aes_128_cfb | des_cfb | aes_192_cfb | aes_256_cfb
           key,
           encode_iv,
           iv_sent = false,     %% true | false
