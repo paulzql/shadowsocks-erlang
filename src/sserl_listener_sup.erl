@@ -37,7 +37,7 @@ stop(Port) ->
     case [P || {_, P, _, _} <- Children, is_pid(P), sserl_listener:get_port(P) =:= Port] of
         [Pid] ->
             error_logger:info_msg("[~p] stopping port ~p", [?MODULE, Port]),            
-            sserl_listener:stop(Pid),
+            supervisor:terminate_child(?SERVER, Pid),
             ok;
         _ ->
             ok
