@@ -1,5 +1,4 @@
-%% flow event
-%%      report: {report, Port, Download, Upload}
+%% flow event report: {report, Port, Download, Upload}
 %% 
 -define(FLOW_EVENT, sserl_flow_event).
 

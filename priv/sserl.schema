@@ -4,38 +4,38 @@
 %% local setting
 %% =================================================
 %% @doc enable one time auth
-{mapping, "ss.ota", "sserl.ota", [
+{mapping, "ss.listener.$name.ota", "sserl.listener", [
           {datatype, {flag, true, false}}
 ]}.
 
 %% @doc ss listen ip and port.
 %%      eg: 0.0.0.0:8388
-{mapping, "ss.client.$name.local", "sserl.client", [
+{mapping, "ss.listener.$name.local", "sserl.listener", [
           {datatype, ip}
 ]}.
 %% @doc server addr
 %%      eg: www.ss.com:8388
-{mapping, "ss.client.$name.server", "sserl.client", [
+{mapping, "ss.listener.$name.server", "sserl.listener", [
           {datatype, [ip,string]}
 ]}.
 
 %% @doc encrypt method.
 %%      eg: aes-256-cfb
-{mapping, "ss.client.$name.method", "sserl.client", [
+{mapping, "ss.listener.$name.method", "sserl.listener", [
           {datatype, string},
           {default,  "rc4-md5"}
 ]}.
 
 %% @doc password.
-{mapping, "ss.client.$name.password", "sserl.client", [
+{mapping, "ss.listener.$name.password", "sserl.listener", [
           {datatype, string}
 ]}.
 
-{translation,"sserl.client",
+{translation,"sserl.listener",
 fun(Conf) ->
-  ConfList = cuttlefish_variable:filter_by_prefix("ss.client", Conf),
+  ConfList = cuttlefish_variable:filter_by_prefix("ss.listener", Conf),
   Map = lists:foldl(fun({[_,_,Name,"local"], {Addr, Port}}, Acc) ->
-                            maps:put(Name, [{local, {Addr,Port}}|maps:get(Name, Acc, [])], Acc);
+                            maps:put(Name, [{ip, Addr},{port,Port}|maps:get(Name, Acc, [])], Acc);
                        ({[_,_,Name,"server"], {Addr,Port}}, Acc) ->
                             maps:put(Name, [{server, {Addr,Port}}|maps:get(Name, Acc, [])], Acc);
                        ({[_,_,Name,"server"], Addr}, Acc) ->
@@ -45,37 +45,6 @@ fun(Conf) ->
                                 _ ->
                                     throw({error, invalid_key_server})
                             end;
-                       ({[_,_,Name, Attr], Value}, Acc) ->
-                            maps:put(Name, [{list_to_atom(Attr), Value}|maps:get(Name, Acc, [])], Acc);
-                       (_, Acc) ->
-                            Acc
-                    end, #{}, ConfList),
-  maps:values(Map)
-end}.
-
-%% @doc ss listen ip and port.
-%%      eg: 0.0.0.0:8388
-{mapping, "ss.server.$name.local", "sserl.server", [
-          {datatype, ip}
-]}.
-
-%% @doc encrypt method.
-%%      eg: aes-256-cfb
-{mapping, "ss.server.$name.method", "sserl.server", [
-          {datatype, string},
-          {default,  "rc4-md5"}
-]}.
-
-%% @doc password.
-{mapping, "ss.server.$name.password", "sserl.server", [
-          {datatype, string}
-]}.
-
-{translation,"sserl.server",
-fun(Conf) ->
-  ConfList = cuttlefish_variable:filter_by_prefix("ss.server", Conf),
-  Map = lists:foldl(fun({[_,_,Name,"local"], {Addr, Port}}, Acc) ->
-                            maps:put(Name, [{local,{Addr, Port}}|maps:get(Name, Acc, [])], Acc);
                        ({[_,_,Name, Attr], Value}, Acc) ->
                             maps:put(Name, [{list_to_atom(Attr), Value}|maps:get(Name, Acc, [])], Acc);
                        (_, Acc) ->

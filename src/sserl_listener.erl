@@ -52,7 +52,8 @@
 start_link(Args) ->
     %% get configs
     Type      = proplists:get_value(type, Args, server),
-    {IP,Port}     = proplists:get_value(local, Args),
+    IP        = proplists:get_value(ip, Args),
+    Port     = proplists:get_value(port, Args),
     ConnLimit = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
     ExpireTime= proplists:get_value(expire_time, Args, max_time()),
     OTA       = proplists:get_value(ota, Args, false),

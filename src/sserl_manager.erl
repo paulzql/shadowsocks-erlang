@@ -140,21 +140,11 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 load_local_ports() ->
     lists:map(fun(C) ->
-                      C1 = lists:keystore(type, 1, C, {type, client}),
-                      case sserl_listener_sup:start(C1) of
+                      case sserl_listener_sup:start(C) of
                           {ok, _} ->
                               ok;
                           E ->
                               throw(E)
                       end
-              end, application:get_env(sserl, client, [])),
-    lists:map(fun(C) ->
-                      C1 = lists:keystore(type, 1, C, {type, server}),
-                      case sserl_listener_sup:start(C1) of
-                          {ok, _} ->
-                              ok;
-                          E ->
-                              throw(E)
-                      end
-              end, application:get_env(sserl, server, [])),
+              end, application:get_env(sserl, listener, [])),
     ok.
