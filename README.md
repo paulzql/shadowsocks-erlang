@@ -24,7 +24,7 @@ Encryption methods
 **Note: this is a erlang app/lib of shadowsocks, not a installable application. 
   you can run with erlang vm or package in your erlang release**
   
-* live demo
+* Live demo
 
   The sserl is current running on X-NET, you can try it on [http://x-net.vip](http://x-net.vip)
   
@@ -51,7 +51,7 @@ Useage
 
 * start / update listener
 
- if the port already started,the method,password and expiretime will be updated.
+ If the port already started,the method,password and expiretime will be updated.
     
 ```erlang
     Args = [{port, 8388}, {type, server}, {ota, false}, {method, "rc4-md5"},{password,"xx"}],
@@ -81,12 +81,12 @@ sserl support [cuttlefish](https://github.com/basho/cuttlefish), you can easy co
          {listener, [ %% a list of listener args
                  [{ip, {0,0,0,0}},      %% listen ip  [optional]
                   {port, 1080}          %% listen port
-                  {method, "rc4-md5"},  %% encryption method [optional]
+                  {method, "rc4-md5"},  %% encryption method 
                   {password, "mypass"}, %% password
-                  {ota, true},          %% use OTA
-                  {expire_time, 3600},  %% expire time (unix time) [optional]
+                  {ota, true},          %% use OTA [optional]
+                  {expire_time, 1472402802},  %% expire time (unix time) [optional]
                   {conn_limit, 1024},   %% max synchronize connections on the port [optional]
-                  {type, client},       %% listener type
+                  {type, client},       %% listener type (client or server)
                   {server, {"x-net.vip", 8388}} %% shadowsocks server (client only) [optional]
                   ],
                   [ %% other listeners
@@ -105,6 +105,23 @@ sserl support [cuttlefish](https://github.com/basho/cuttlefish), you can easy co
          {sync_mysql_pass, "123456"},
          {sync_report_min, 1048576}    %% bytes threshold to report flow 
      ]}
+```
+
+Cluster
+-----
+
+sserl will share the flow data with joined cluster
+
+* Start cluster
+
+```erlang
+    mnesia_cluster:join('xx@xx.com').
+```
+
+* Leave cluster
+
+```erlang
+    mensia_cluster:leave().
 ```
 
 Events

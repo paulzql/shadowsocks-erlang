@@ -297,11 +297,11 @@ handle_server_s2c(Data, State=#state{csocket=CSocket, cipher_info=CipherInfo,
 %% handle ota frame
 handle_ota(State = #state{ota_data=Data, ota_len=2}) when byte_size(Data) >= 2 ->
     <<DataLen:16/big, _/binary>> = Data,
-    handle_ota(State#state{ota_len=DataLen+12});
+    handle_ota(State#state{ota_len=DataLen+?HMAC_LEN+2});
 handle_ota(State = #state{ota_iv=Iv,ota_data=Data, ota_len=Len, ota_id=Id,
                          ssocket=SSocket, up=Flow, sending=S}) when byte_size(Data) >= Len ->
-    DataLen = Len-12,
-    <<_:16/big, Hmac:10/binary, FrameData:DataLen/binary, Rest/binary>> = Data,
+    DataLen = Len-?HMAC_LEN - 2,
+    <<_:16/big, Hmac:?HMAC_LEN/binary, FrameData:DataLen/binary, Rest/binary>> = Data,
     case shadowsocks_crypt:hmac([Iv, <<Id:32/big>>], FrameData) of
         Hmac ->
             S1 = try_send(SSocket, FrameData),
