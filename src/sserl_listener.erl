@@ -32,7 +32,10 @@
           method,       % 加密类型
           accepting,     % 是否正在接收新连接
           conns = 0,    % 连接数
-          expire_timer = undefined % 过期时钟
+          expire_timer = undefined, % 过期时钟
+          type = server,
+          cipher_info = undefined,
+          server = undefined
 }).
 
 %%%===================================================================
@@ -47,20 +50,23 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(Args) ->
-    %% 获取配置信息
-    Port       = proplists:get_value(port, Args),
-    ConnLimit  = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
-    ExpireTime = proplists:get_value(expire_time, Args, max_time()),
+    %% get configs
+    Type      = proplists:get_value(type, Args, server),
+    {IP,Port}     = proplists:get_value(local, Args),
+    ConnLimit = proplists:get_value(conn_limit,  Args, ?MAX_LIMIT),
+    ExpireTime= proplists:get_value(expire_time, Args, max_time()),
     OTA       = proplists:get_value(ota, Args, false),
     Password  = proplists:get_value(password, Args),
     Method    = parse_method(proplists:get_value(method, Args, rc4_md5)),
-    IP        = proplists:get_value(ip, Args, undefined),
     CurrTime  = os:system_time(milli_seconds),
+    Server    = proplists:get_value(server, Args),
     %% 校验参数
     ValidMethod = lists:any(fun(M) -> M =:= Method end, shadowsocks_crypt:methods()),
     if
-        not is_integer(Port) ->
-            {error, {badargs, port_need_integer}};
+        Type =/=server andalso Type =/= client ->
+            {error, {badargs, invalid_type}};
+        Type =:= client andalso Server =:= undefined ->
+            {error, {badargs, client_need_server}};
         Port < 0 orelse Port > 65535 ->
             {error, {badargs, port_out_of_range}};
         not is_integer(ConnLimit) ->
@@ -73,9 +79,12 @@ start_link(Args) ->
             {error, expired};
         true ->
             State = #state{ota=OTA, port=Port, lsocket=undefined, 
+                           type = Type,
+                           cipher_info = shadowsocks_crypt:init_cipher_info(Method, Password),
                            conn_limit=ConnLimit, 
                            expire_time=ExpireTime,
                            password=Password, method=Method, 
+                           server = Server,
                            expire_timer=erlang:start_timer(max_time(ExpireTime), self(), expire, [{abs,true}])},
             gen_server:start_link(?MODULE, [State,IP], [])
     end.
@@ -155,10 +164,12 @@ handle_call({update, Args}, _From, State) ->
     erlang:cancel_timer(State#state.expire_timer, []),
     ExpireTimer = erlang:start_timer(max_time(ExpireTime), self(), expire, [{abs,true}]),
     {reply, ok, State#state{conn_limit = ConnLimit,
-                     expire_time= ExpireTime,
-                     password   = Password,
-                     method     = Method,
-                     expire_timer=ExpireTimer}};
+                            expire_time= ExpireTime,
+                            password   = Password,
+                            method     = Method,
+                            expire_timer=ExpireTimer,
+                            cipher_info = shadowsocks_crypt:init_cipher_info(Method, Password)
+                           }};
 
 handle_call(_Request, _From, State) ->
     Reply = ok,
@@ -192,19 +203,23 @@ handle_info({timeout, _Ref, expire}, State) ->
     {stop, expire, State};
 
 handle_info({inet_async, _LSocket, _Ref, {ok, CSocket}}, 
-            State=#state{ota=OTA, port=Port,method=Method, password=Password,conns=Conns}) ->
+            State=#state{ota=OTA, port=Port, type=Type, 
+                         cipher_info=Cipher, server=Server, conns=Conns}) ->
     true = inet_db:register_socket(CSocket, inet_tcp), 
     {ok, {Addr, _}} = inet:peername(CSocket),
     gen_event:notify(?STAT_EVENT, {listener, accept, Port, Addr}),
 
-    {ok, Pid} = sserl_conn:start_link(CSocket, {OTA, Method, Password, Port}),
+    {ok, Pid} = sserl_conn:start_link(CSocket, {Port, Server, OTA, Type, Cipher}),
+
     case gen_tcp:controlling_process(CSocket, Pid) of
         ok ->
+            gen_event:notify(?STAT_EVENT, {conn, open, Pid}),            
             Pid ! {shoot, CSocket};
         {error, _} ->
             exit(Pid, kill),
             gen_tcp:close(CSocket)
     end,
+
     case prim_inet:async_accept(State#state.lsocket, -1) of
         {ok, _} ->
             {noreply, State#state{conns=Conns+1}};
@@ -215,7 +230,8 @@ handle_info({inet_async, _LSocket, _Ref, {ok, CSocket}},
 handle_info({inet_async, _LSocket, _Ref, Error}, State) ->
     {stop, Error, State};
 
-handle_info({'EXIT', _Pid, _Reason}, State = #state{conns=Conns}) ->
+handle_info({'EXIT', Pid, Reason}, State = #state{conns=Conns}) ->
+    gen_event:notify(?STAT_EVENT, {conn, close, Pid, Reason}),
     {noreply, State#state{conns=Conns-1}};
 
 handle_info(_Info, State) ->

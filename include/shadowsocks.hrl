@@ -31,6 +31,7 @@
 -define(OTA_ATYP_V6, 16#14).
 -define(OTA_ATYP_DOM,16#13).
 -define(GET_ATYP(Atyp), Atyp band 16#0F).
+-define(OTA_FLAG, 16#10).
 
 -define(HMAC_LEN, 10).
 -define(OTA_HEAD_LEN, 12).

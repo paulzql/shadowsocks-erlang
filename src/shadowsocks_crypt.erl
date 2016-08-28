@@ -74,6 +74,18 @@ encode(#cipher_info{method=_Method, key=Key, encode_iv=Iv, enc_rest=Rest}=Cipher
 decode(#cipher_info{method=none}, Data) ->
     Data;
 
+%% recv iv
+decode(CipherInfo=#cipher_info{method=M, decode_iv=undefined, dec_rest=Rest}, EncData) ->
+    {_, IvLen} = key_iv_len(M),
+    case <<Rest/binary, EncData/binary>> of
+        Rest1 when byte_size(Rest1) >= IvLen ->
+            <<Iv:IvLen/binary, Rest2/binary>> = Rest1,
+            StreamState = shadowsocks_crypt:stream_init(M, CipherInfo#cipher_info.key, Iv),
+            decode(CipherInfo#cipher_info{decode_iv=Iv, stream_dec_state=StreamState, dec_rest= <<>>}, Rest2);
+        Rest1 ->
+            {CipherInfo#cipher_info{dec_rest=Rest1}}
+    end;
+
 decode(#cipher_info{method=rc4_md5, stream_dec_state=S}=CipherInfo, EncData) ->
     {S1, Data} = crypto:stream_decrypt(S, EncData),
     {CipherInfo#cipher_info{stream_dec_state=S1}, Data};

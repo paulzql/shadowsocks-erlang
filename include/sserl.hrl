@@ -5,8 +5,10 @@
 
 %% stat event
 %%      new listener {listener, new, Port}
-%%      accept  : {listener, accept, Addr, Port}
-%%      new conn: {conn, new, Addr, Port}
+%%      accept    :  {listener, accept, Addr, Port}
+%%      open      :  {conn, open, Pid}
+%%      close     :  {conn, close, Pid, Reason}
+%%      connect   :  {conn, connect, Addr, Port}
 %% 
 -define(STAT_EVENT, sserl_stat_event).
 
