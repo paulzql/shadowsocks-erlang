@@ -12,7 +12,7 @@ Features:
 - OTA    support
 - Mulit user support
 - User management API support
-- IP blacklist support
+- IP blacklist support [TODO]
 
 Encryption methods
 - table (deprecated)
@@ -51,7 +51,7 @@ Useage
 
 * start / update listener
 
- if the port already started,the method,password and expiretime will update.
+ if the port already started,the method,password and expiretime will be updated.
     
 ```erlang
     Args = [{port, 8388}, {type, server}, {ota, false}, {method, "rc4-md5"},{password,"xx"}],
