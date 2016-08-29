@@ -63,9 +63,10 @@ start_link(Socket, Info) ->
     proc_lib:start_link(?MODULE, init, [Socket, Info]).
     %% gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-init(Socket, {Port, Server, OTA, Type, Cipher}) ->
+init(Socket, {Port, Server, OTA, Type, {Method,Password}}) ->
     proc_lib:init_ack({ok, self()}),
     wait_socket(Socket),
+    Cipher = shadowsocks_crypt:init_cipher_info(Method, Password),
     State = #state{csocket=Socket, ssocket=undefined, 
                    ota=OTA, port=Port, type=Type,
                    target = Server,

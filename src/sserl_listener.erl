@@ -23,19 +23,18 @@
 -define(MAX_LIMIT, 16#0FFFFFFFFFFFFFFF).
 
 -record(state, {
-          ota,          % 一次验证
-          port,         % 端口
-          lsocket,      % 监听Socket
-          conn_limit,   % 连接数限制
-          expire_time,  % 失效时间
-          password,     % 密码
-          method,       % 加密类型
-          accepting,     % 是否正在接收新连接
-          conns = 0,    % 连接数
-          expire_timer = undefined, % 过期时钟
+          ota,          % one time auth
+          port,         % listen port
+          lsocket,      % listen socket
+          conn_limit,   % connection count limit
+          expire_time,  % expire time
+          password,     % 
+          method,       % 
+          accepting,     % is accepting new connection?
+          conns = 0,    % current connection count
+          expire_timer = undefined, % expire timer
           type = server,
-          cipher_info = undefined,
-          server = undefined
+          server = undefined % server {address, port}
 }).
 
 %%%===================================================================
@@ -61,7 +60,7 @@ start_link(Args) ->
     Method    = parse_method(proplists:get_value(method, Args, rc4_md5)),
     CurrTime  = os:system_time(milli_seconds),
     Server    = proplists:get_value(server, Args),
-    %% 校验参数
+    %% validate args
     ValidMethod = lists:any(fun(M) -> M =:= Method end, shadowsocks_crypt:methods()),
     if
         Type =/=server andalso Type =/= client ->
@@ -81,7 +80,6 @@ start_link(Args) ->
         true ->
             State = #state{ota=OTA, port=Port, lsocket=undefined, 
                            type = Type,
-                           cipher_info = shadowsocks_crypt:init_cipher_info(Method, Password),
                            conn_limit=ConnLimit, 
                            expire_time=ExpireTime,
                            password=Password, method=Method, 
@@ -116,17 +114,17 @@ init([State,IP]) ->
 
     Opts = [binary, {backlog, 20},{nodelay, true}, {active, false}, 
             {packet, raw}, {reuseaddr, true},{send_timeout_close, true}],
-    %% 获取IP地址
+    %% get the ip address
     Opts1 = case IP of
         undefined ->
             Opts;
         Addr ->
              Opts++[{ip, Addr}]
     end,
-    %% 开始监听
+    %% start listen
     case gen_tcp:listen(State#state.port, Opts1) of
         {ok, LSocket} ->
-            %% 设置异步接收
+            %% set to async accept, so we can do many things on this process
             case prim_inet:async_accept(LSocket, -1) of
                 {ok, _} ->
                     gen_event:notify(?STAT_EVENT, {listener, new, State#state.port}),
@@ -156,20 +154,21 @@ init([State,IP]) ->
 handle_call(get_port, _From, State=#state{port=Port}) ->
     {reply, Port, State};
 
+%% update args
 handle_call({update, Args}, _From, State) ->
     ConnLimit  = proplists:get_value(conn_limit,  Args, State#state.conn_limit),
     ExpireTime = proplists:get_value(expire_time, Args, State#state.expire_time),
     Password  = proplists:get_value(password, Args, State#state.password),
     Method     = parse_method(proplists:get_value(method, Args, State#state.method)),    
-
+    %% reset expire timer
     erlang:cancel_timer(State#state.expire_timer, []),
     ExpireTimer = erlang:start_timer(max_time(ExpireTime), self(), expire, [{abs,true}]),
+
     {reply, ok, State#state{conn_limit = ConnLimit,
                             expire_time= ExpireTime,
                             password   = Password,
                             method     = Method,
-                            expire_timer=ExpireTimer,
-                            cipher_info = shadowsocks_crypt:init_cipher_info(Method, Password)
+                            expire_timer=ExpireTimer
                            }};
 
 handle_call(_Request, _From, State) ->
@@ -205,12 +204,12 @@ handle_info({timeout, _Ref, expire}, State) ->
 
 handle_info({inet_async, _LSocket, _Ref, {ok, CSocket}}, 
             State=#state{ota=OTA, port=Port, type=Type, 
-                         cipher_info=Cipher, server=Server, conns=Conns}) ->
+                         method=Method,password=Password, server=Server, conns=Conns}) ->
     true = inet_db:register_socket(CSocket, inet_tcp), 
     {ok, {Addr, _}} = inet:peername(CSocket),
     gen_event:notify(?STAT_EVENT, {listener, accept, Port, Addr}),
 
-    {ok, Pid} = sserl_conn:start_link(CSocket, {Port, Server, OTA, Type, Cipher}),
+    {ok, Pid} = sserl_conn:start_link(CSocket, {Port, Server, OTA, Type, {Method, Password}}),
 
     case gen_tcp:controlling_process(CSocket, Pid) of
         ok ->
