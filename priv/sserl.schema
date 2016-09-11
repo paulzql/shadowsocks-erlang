@@ -4,7 +4,7 @@
 %% local setting
 %% =================================================
 {mapping, "ss.listener.$name.type", "sserl.listener", [
-          {datatype, {enum, [{client,client} {server,server}]}}
+          {datatype, {enum, [{client,client}, {server,server}]}}
 ]}.
 %% @doc enable one time auth
 {mapping, "ss.listener.$name.ota", "sserl.listener", [
