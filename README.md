@@ -145,4 +145,4 @@ Events
 License
 -----
 
-@see LICENSE
+BSD
