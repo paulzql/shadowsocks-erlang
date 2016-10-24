@@ -21,12 +21,12 @@ Encryption methods
 - aes-192-cfb
 - aes-256-cfb
 
-**Note: this is a erlang app/lib of shadowsocks, not a installable application. 
-  you can run with erlang vm or package in your erlang release**
+**Note: this is an erlang app/lib of shadowsocks, not an installable application. 
+  you can run with erlang VM or package in your erlang release**
   
 * Live demo
 
-  The sserl is current running on X-NET, you can try it on [http://x-net.vip](http://x-net.vip)
+  The sserl is already running on X-NET, you can try it on [http://x-net.vip](http://x-net.vip)
   
 Build
 -----
@@ -34,7 +34,7 @@ Build
     $ rebar3 compile
     
 
-Useage
+Usage
 -----
 
 * start
@@ -51,7 +51,7 @@ Useage
 
 * start / update listener
 
- If the port already started,the method,password and expiretime will be updated.
+ If the port already started,the method, password and expiretime will be updated.
     
 ```erlang
     Args = [{port, 8388}, {type, server}, {ota, false}, {method, "rc4-md5"},{password,"xx"}],
@@ -67,7 +67,7 @@ Useage
 Configuration
 -----
 
-sserl support [cuttlefish](https://github.com/basho/cuttlefish), you can easy configurate with cuttlefish schema.
+sserl support [cuttlefish](https://github.com/basho/cuttlefish), you can easy configure with cuttlefish schema.
 
 * cuttlefish files
 
@@ -81,7 +81,7 @@ sserl support [cuttlefish](https://github.com/basho/cuttlefish), you can easy co
          {listener, [ %% a list of listener args
                  [{ip, {0,0,0,0}},      %% listen ip  [optional]
                   {port, 1080}          %% listen port
-                  {method, "rc4-md5"},  %% encryption method 
+                  {method, "rc4-md5"},  %% encryption method
                   {password, "mypass"}, %% password
                   {ota, true},          %% use OTA [optional]
                   {expire_time, 1472402802},  %% expire time (unix time) [optional]
@@ -103,7 +103,7 @@ sserl support [cuttlefish](https://github.com/basho/cuttlefish), you can easy co
          {sync_mysql_db,   "ss-panel"}, 
          {sync_mysql_user, "root"},
          {sync_mysql_pass, "123456"},
-         {sync_report_min, 1048576}    %% bytes threshold to report flow 
+         {sync_report_min, 1048576}    %% bytes threshold to report flow
      ]}
 ```
 
