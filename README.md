@@ -24,9 +24,6 @@ Encryption methods
 **Note: this is an erlang app/lib of shadowsocks, not an installable application. 
   you can run with erlang VM or package in your erlang release**
   
-* Live demo
-
-  The sserl is already running on X-NET, you can try it on [http://x-net.vip](http://x-net.vip)
   
 Build
 -----
